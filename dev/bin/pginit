@@ -90,7 +90,8 @@ log_file=$log_dir/server.log
 mkdir -p "$cluster_dir"
 mkdir -p "$data_dir"
 mkdir -p "$log_dir"
-"$PG_BIN"/pg_ctl initdb -D "$data_dir" -o "--encoding=UTF8"
+# Call initdb directly: `pg_ctl initdb` no longer accepts -D on PG17+.
+"$PG_BIN"/initdb -D "$data_dir" --encoding=UTF8
 
 # create database user
 date

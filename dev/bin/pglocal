@@ -65,12 +65,12 @@ cp_direct_files() {
 
 	# # copy the actual files only
 	find "$src_dir" -maxdepth 1 -type f | while read -r file; do
-		cp "$file" "$dest_dir" || return 1
+		cp -f "$file" "$dest_dir" || return 1
 	done
 
 	# create symlinks
 	find "$src_dir" -maxdepth 1 -type l | while read -r link; do
-		ln -s "$(realpath "$link")" "$dest_dir/$(basename "$link")" || return 1
+		ln -sf "$(realpath "$link")" "$dest_dir/$(basename "$link")" || return 1
 	done
 }
 
@@ -91,7 +91,7 @@ cp_recursive() {
 
 	# copy the actual files only
 	find "$src_dir" -type f -printf '%P\n' | while read -r file; do
-		cp -r "$src_dir/$file" "$dest_dir/$file" || return 1
+		cp -rf "$src_dir/$file" "$dest_dir/$file" || return 1
 	done
 }
 
@@ -142,6 +142,6 @@ cp_recursive "$new_install_dir/share/postgresql" "$($PG_CONFIG --sharedir)"
 chmod -R +w "$new_install_dir"
 
 # link outdir/default if not exists
-if [ ! -e "$outdir/default" ]; then
+if [ ! -e "$outdir/default" ] && [ ! -L "$outdir/default" ]; then
 	ln -s "$new_install_dir" "$outdir/default"
 fi

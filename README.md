@@ -191,11 +191,12 @@ Behind the scenes, this builds the extension with the `testfn` build option set 
 pgzx is currently under heavy development by the [Xata](https://xata.io) team. If you want to try Zig for writing PostgreSQL extensions, it is easier with pgzx than without, but expect breaking changes and potential instability. If you need help, join us on the [Xata discord](https://xata.io/discord).
 
 * Utilities
-  * [ ] Postgres versions (compile and test)
+  * [x] Postgres versions (compile and test)
+    * [x] Postgres 16
+    * [x] Postgres 17
+    * [x] Postgres 18
     * [ ] Postgres 14
     * [ ] Postgres 15
-    * [ ] Postgres 16
-    * [x] Postgres 17
   * [x] Logging
   * [x] Error handling
   * [x] Memory context allocators
@@ -204,8 +205,8 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
   * [x] LWLocks
   * [x] Signals and interrupts
   * [x] String formatting
-  * [ ] Shared memory
-  * [ ] SPI
+  * [x] Shared memory
+  * [x] SPI
   * Postgres data structures wrappers:
     * Array based list (List)
         * [x] Pointer list
@@ -261,6 +262,15 @@ If you want to use docker instead, run:
 $ ./dev/docker/run.sh
 ```
 
+This drops you into an interactive development shell. To run a single command
+instead, pass it to the container. `runuser` needs POSIX option parsing so that
+it does not swallow the `-c` flag:
+
+```
+$ docker run --rm -e POSIXLY_CORRECT=1 \
+    -v "$PWD:/home/dev/workdir" -w /home/dev/workdir pgzx:latest \
+    nix develop -c bash -c 'pguse 17 && pglocal && pginit && pgstart && zig build unit -p "$PG_HOME"; pgstop'
+```
 
 NOTE:
 We also provide a `.envrc` file to automatically enter the development shell when entering
@@ -269,17 +279,25 @@ the projects folder. If you use direnv you can enable the environment via `diren
 The nix configuration already installs PostgreSQL, but for testing we want to
 have a local postgres installation where we can install our test extensions in.
 
-We use `pglocal` to relocate the existing installation into our development environment:
+The development shell provides PostgreSQL 16, 17 and 18. Only one version can be
+active at a time, so a single `pg_config` on `PATH` dispatches to the selected
+version. Select a version with `pguse` before relocating it:
 
 ```
+$ pguse 17
 $ pglocal
 ...
 
 $ ls out
-16  default
+16  17  default
 ```
 
-The `out/default` folder is a symlink to the postgres installation currently in use.
+We use `pglocal` to relocate the selected installation into our development
+environment. The `out/default` folder is a symlink to the postgres installation
+currently in use; `pguse <version>` repoints it and records the choice in
+`out/.pgversion`. You only need to run `pglocal` once per version, and each
+version keeps its own cluster under `out/<version>/var/`, so run `pginit` once
+per version as well.
 
 Having a local installation we want to create a local database and user:
 
@@ -414,22 +432,20 @@ Note: Delete the `zig-cache` folder when switching to another Postgres installat
 
 ### Debugging Zig standard library and build script support
 
-To debug Zig build scripts or the standard library all you need is the original sources. No additional build step is required. Anyways, it is recommended to use the same library version as the zig compiler ships with. You can query the current version or Git commit of a nightly build using the `zig` tool:
+To debug Zig build scripts or the standard library all you need is the original sources. No additional build step is required. Anyways, it is recommended to use the same library version as the zig compiler ships with. You can query the current version using the `zig` tool:
 
 ```
 $ zig version
-0.13.0-dev.28+3c5e84073
+0.16.0
 ```
 
-The version shown here for example indicates that we use a nightly build. The commit ID of that build is `0b744da84`.
-
-You can clone and checkout the repository by yourself. We also have a small script `ziglocal` to checkout and even build the compiler. You can use the script to just checkout the correct version into your development environment:
+The development shell uses the tagged release `0.16.0`. You can clone and checkout the matching sources by yourself. We also have a small script `ziglocal` to checkout and even build the compiler. You can use the script to just checkout the correct version into your development environment:
 
 ```
-$ ziglocal clone --commit 0b744da84
+$ ziglocal clone --branch 0.16.0
 ```
 
-This command clones the master branch only into the `./out/zig` directory.
+This command clones only that tag into the `./out/zig` directory.
 
 Now when building the test extensions you can use the `--zig-lib-dir` CLI flag to tell the compiler to use an alternative library:
 
@@ -454,13 +470,13 @@ Optionally we might want to debug the actual version that we normally use:
 
 ```
 $ zig version
-0.12.0-dev.3154+0b744da84
+0.16.0
 ```
 
-Next we checkout and compile the toolchain (Note: the `--commit` option is optional):
+Next we checkout and compile the toolchain (Note: the `--branch` option is optional):
 
 ```
-$ ziglocal --commit 0b744da84
+$ ziglocal --branch 0.16.0
 ```
 
 This step will take a while. You will find the compiler and library of your local debug build in the `out/zig/build/stage3` directory.
@@ -469,15 +485,13 @@ This step will take a while. You will find the compiler and library of your loca
 
 ### Which Zig version do you support?
 
-The Zig toolchain, including the compiler, build system, and standard library, is still in development and breaking changes do happen every now and then. For this reason this project follows the [Zig master branch](https://github.com/ziglang/zig).
+The Zig toolchain, including the compiler, build system, and standard library, is still in development and breaking changes do happen every now and then. This project targets **Zig 0.16**.
 
-The Nix based development shell uses [zig-overlay](https://github.com/mitchellh/zig-overlay) in conjunction with the `flake.lock` file to pin the zig toolchain version to a recent commit ID.
+The Nix based development shell takes Zig from `nixpkgs` (exposed as `pkgs.zigpkgs.stable` through an overlay), so the `flake.lock` file pins the exact nixpkgs revision, and with it the compiler version. We track `nixpkgs-unstable`, which is also what provides PostgreSQL 16, 17 and 18.
 
 The dependency is updated by us every so often and we try to test and fix breaking changes when updating the toolchain version. We highly recommend to use the projects develoment shell when testing the example extensions provided, otherwise you might have problems compiling the extensions at all.
 
 We understand not everyone is keen to install Nix locally. For getting to know the environment you can build and run a development shell in a local docker container. Use `./dev/docker/build.sh` to build the container and `./dev/docker/run.sh` to start the dockerized development shell.
-
-The current stable release is verion 0.12. As the build system APIs and package management system are undergoing heavy development recently we chose to stick with the `master` branch for now.
 
 
 ### Where is my extension installed?

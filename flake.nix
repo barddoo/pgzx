@@ -2,19 +2,9 @@
   description = "Description for the project";
 
   inputs = {
-    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2405.635732.tar.gz";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     parts.url = "github:hercules-ci/flake-parts";
-
-    zig-overlay = {
-      url = "github:mitchellh/zig-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    zls = {
-      url = "github:zigtools/zls";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.zig-overlay.follows = "zig-overlay";
-    };
 
     pre-commit-hooks-nix = {
       url = "github:cachix/pre-commit-hooks.nix";
@@ -27,22 +17,15 @@
     nixpkgs,
     ...
   }: let
-    zig-stable = "0.16.0";
-
-    zig-overlay = _final: prev: let
-      orig = inputs.zig-overlay.packages.${prev.system};
-    in {
-      zigpkgs =
-        orig
-        // {
-          stable = orig.${zig-stable};
-        };
-    };
-
-    zls-overlay = final: prev: {
-      zls = inputs.zls.packages.${prev.system}.zls.overrideAttrs (_oldAttrs: {
-        nativeBuildInputs = [final.zigpkgs.stable];
-      });
+    # pgzx uses the Zig toolchain that nixpkgs ships (currently Zig 0.16 on
+    # nixpkgs-unstable). The `zigpkgs` overlay keeps the attribute names that
+    # the rest of the flake and downstream templates rely on.
+    zigpkgs-overlay = _final: prev: {
+      zigpkgs = {
+        default = prev.zig;
+        stable = prev.zig;
+        master = prev.zig;
+      };
     };
   in
     inputs.parts.lib.mkFlake {inherit inputs;} {
@@ -56,11 +39,9 @@
       flake.overlays = rec {
         default = nixpkgs.lib.composeManyExtensions [
           zigpkgs
-          zls
           pgzx_scripts
         ];
-        zigpkgs = zig-overlay;
-        zls = zls-overlay;
+        zigpkgs = zigpkgs-overlay;
         pgzx_scripts = _final: prev: {
           pgzx_scripts = self.packages.${prev.system}.pgzx_scripts;
         };
@@ -85,8 +66,7 @@
         nixpkgs = {
           config.allowBroken = true;
           overlays = [
-            zig-overlay
-            zls-overlay
+            zigpkgs-overlay
           ];
         };
 
@@ -177,10 +157,10 @@
                   pkgs.readline
                   pkgs.openssl
                   pkgs.libxml2
-                  pkgs.llvmPackages_17.llvm
-                  pkgs.llvmPackages_17.lld
-                  pkgs.llvmPackages_17.clang
-                  pkgs.llvmPackages_17.clang-unwrapped
+                  pkgs.llvmPackages_20.llvm
+                  pkgs.llvmPackages_20.lld
+                  pkgs.llvmPackages_20.clang
+                  pkgs.llvmPackages_20.clang-unwrapped
                   pkgs.lz4
                   pkgs.zstd
                   pkgs.libxslt

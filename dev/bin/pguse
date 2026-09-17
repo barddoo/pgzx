@@ -7,5 +7,16 @@ ROOTDIR=${PRJ_ROOT:-$(git rev-parse --show-toplevel)}
 WORKDIR=${WORKDIR:-"$ROOTDIR/out"}
 version=${1:-"16"}
 
+case "$version" in
+	16 | 17 | 18 | local) ;;
+	*)
+		echo "pguse: unsupported PostgreSQL version '$version' (supported: 16 17 18 local)" >&2
+		exit 1
+		;;
+esac
+
+mkdir -p "$WORKDIR"
+echo "$version" >"$WORKDIR/.pgversion"
+
 rm -f "$WORKDIR/default"
 ln -s "$WORKDIR/$version" "$WORKDIR/default"

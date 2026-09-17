@@ -1,6 +1,8 @@
 FROM ubuntu:latest
 RUN apt update -y
-RUN apt install curl git sudo xz-utils -y
+# libssl-dev/libkrb5-dev provide the system headers (openssl/ssl.h, gssapi.h)
+# that build.zig includes via /usr/include when translating the Postgres headers.
+RUN apt install curl git sudo xz-utils libssl-dev libkrb5-dev -y
 
 # Create a non-root user
 ARG USERNAME=dev

@@ -111,6 +111,7 @@
 #include "nodes/lockoptions.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h"
+#include "nodes/miscnodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/params.h"

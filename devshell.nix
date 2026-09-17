@@ -32,6 +32,34 @@
       EOF
     '';
   };
+
+  # Supported PostgreSQL major versions. Only one `pg_config` can be on PATH
+  # at a time, so the shell exposes a dispatcher that selects the version from
+  # $PG_VERSION, falling back to out/.pgversion (written by `pguse`) and
+  # finally to PostgreSQL 16.
+  pgVersions = {
+    "16" = pkgs.postgresql_16;
+    "17" = pkgs.postgresql_17;
+    "18" = pkgs.postgresql_18;
+  };
+
+  pgConfig = pkgs.writeShellScriptBin "pg_config" ''
+    set -euo pipefail
+    root="''${PRJ_ROOT:-$PWD}"
+    version="''${PG_VERSION:-}"
+    if [ -z "$version" ] && [ -r "$root/out/.pgversion" ]; then
+      version="$(cat "$root/out/.pgversion")"
+    fi
+    case "''${version:-16}" in
+      16) exec ${pkgs.postgresql_16.pg_config}/bin/pg_config "$@" ;;
+      17) exec ${pkgs.postgresql_17.pg_config}/bin/pg_config "$@" ;;
+      18) exec ${pkgs.postgresql_18.pg_config}/bin/pg_config "$@" ;;
+      *)
+        echo "pg_config: unsupported PostgreSQL version '$version' (supported: ${lib.concatStringsSep ", " (lib.attrNames pgVersions)})" >&2
+        exit 1
+        ;;
+    esac
+  '';
   # On darwin we expect command line tools to be installed.
   # It is possible to install clang/gcc as nix package, but linking
   # can be quite a pain.
@@ -48,7 +76,10 @@ in {
       pkgs.shellcheck
       pkgs.shfmt
 
-      pkgs.postgresql_16_jit
+      # Postgres tooling. `postgresql_NN_jit` is a withPackages/buildEnv wrapper
+      # whose symlinked tree pglocal cannot relocate, so we use the plain
+      # packages and pick one through the `pg_config` dispatcher above.
+      pgConfig
       pkgs.openssl
       pkgs.gss
       pkgs.krb5

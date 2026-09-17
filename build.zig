@@ -49,12 +49,16 @@ pub fn build(b: *std.Build) void {
 
         // Host C headers: libpq-be.h pulls in openssl/ssl.h and gssapi.h.
         // translate-c does not add the system include dirs on its own.
-        // The multiarch dir is where Debian keeps opensslconf.h.
+        // The multiarch dir is where Debian keeps opensslconf.h; add the common
+        // ones so this works on both x86_64 and aarch64 hosts.
         translate_c.addIncludePath(.{
             .cwd_relative = "/usr/include",
         });
         translate_c.addIncludePath(.{
             .cwd_relative = "/usr/include/x86_64-linux-gnu",
+        });
+        translate_c.addIncludePath(.{
+            .cwd_relative = "/usr/include/aarch64-linux-gnu",
         });
 
         const module = translate_c.createModule();
