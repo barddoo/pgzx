@@ -111,7 +111,10 @@
 #include "nodes/lockoptions.h"
 #include "nodes/makefuncs.h"
 #include "nodes/memnodes.h"
+// ErrorSaveContext lives here on PG16+; the header does not exist on PG15.
+#if PG_VERSION_NUM >= 160000
 #include "nodes/miscnodes.h"
+#endif
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/params.h"

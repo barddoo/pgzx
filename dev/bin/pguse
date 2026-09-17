@@ -8,9 +8,9 @@ WORKDIR=${WORKDIR:-"$ROOTDIR/out"}
 version=${1:-"16"}
 
 case "$version" in
-	16 | 17 | 18 | local) ;;
+	15 | 16 | 17 | 18 | local) ;;
 	*)
-		echo "pguse: unsupported PostgreSQL version '$version' (supported: 16 17 18 local)" >&2
+		echo "pguse: unsupported PostgreSQL version '$version' (supported: 15 16 17 18 local)" >&2
 		exit 1
 		;;
 esac

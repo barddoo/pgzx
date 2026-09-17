@@ -38,6 +38,7 @@
   # $PG_VERSION, falling back to out/.pgversion (written by `pguse`) and
   # finally to PostgreSQL 16.
   pgVersions = {
+    "15" = pkgs.postgresql_15;
     "16" = pkgs.postgresql_16;
     "17" = pkgs.postgresql_17;
     "18" = pkgs.postgresql_18;
@@ -51,6 +52,7 @@
       version="$(cat "$root/out/.pgversion")"
     fi
     case "''${version:-16}" in
+      15) exec ${pkgs.postgresql_15.pg_config}/bin/pg_config "$@" ;;
       16) exec ${pkgs.postgresql_16.pg_config}/bin/pg_config "$@" ;;
       17) exec ${pkgs.postgresql_17.pg_config}/bin/pg_config "$@" ;;
       18) exec ${pkgs.postgresql_18.pg_config}/bin/pg_config "$@" ;;

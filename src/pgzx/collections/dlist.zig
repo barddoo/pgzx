@@ -81,7 +81,8 @@ pub fn DList(comptime T: type, comptime node_field: std.meta.FieldEnum(T)) type 
         }
 
         pub inline fn isEmpty(self: *const Self) bool {
-            return pg.dlist_is_empty(&self.list);
+            // PG15 takes a non-const `dlist_head *`; PG16+ added `const`.
+            return pg.dlist_is_empty(@constCast(&self.list));
         }
 
         pub inline fn headNode(self: *const Self) *T {
@@ -157,11 +158,27 @@ pub fn DList(comptime T: type, comptime node_field: std.meta.FieldEnum(T)) type 
         }
 
         pub inline fn deleteThorougly(node: *T) void {
-            pg.dlist_delete_thoroughly(descr.nodePtr(node));
+            const n = descr.nodePtr(node);
+            if (comptime pg.PG_VERSION_NUM >= 160000) {
+                pg.dlist_delete_thoroughly(n);
+            } else {
+                // PG15 has no dlist_delete_thoroughly(); zero the links after
+                // unlinking so the node reads as detached.
+                pg.dlist_delete(n);
+                n.next = null;
+                n.prev = null;
+            }
         }
 
         pub inline fn isDetached(node: *T) bool {
-            return pg.dlist_is_detached(descr.nodePtr(node));
+            const n = descr.nodePtr(node);
+            if (comptime pg.PG_VERSION_NUM >= 160000) {
+                return pg.dlist_node_is_detached(n);
+            } else {
+                // PG15 has no dlist_node_is_detached(); dlist_delete() zeroes
+                // both links to signal a detached node.
+                return n.next == null and n.prev == null;
+            }
         }
     };
 }
@@ -365,5 +382,17 @@ pub const TestSuite_DList = struct {
         try std.testing.expectEqual(2, list.count());
         try std.testing.expectEqual(elems[1].node.next, null);
         try std.testing.expectEqual(elems[1].node.prev, null);
+    }
+
+    pub fn testIsDetached() !void {
+        var list = TList.init();
+        var elems = [_]T{ .{ .value = 1 }, .{ .value = 2 } };
+        list.appendFromSlice(elems[0..]);
+
+        try std.testing.expect(!TList.isDetached(&elems[0]));
+
+        TList.deleteThorougly(&elems[0]);
+        try std.testing.expect(TList.isDetached(&elems[0]));
+        try std.testing.expectEqual(1, list.count());
     }
 };

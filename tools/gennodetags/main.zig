@@ -21,6 +21,9 @@ const tagsOnly = std.StaticStringMap(void).initComptime([_]struct { []const u8 }
     .{"T_IntList"},
     .{"T_OidList"},
     .{"T_XidList"},
+
+    // PG15-only tag with no corresponding node type (removed in PG16)
+    .{"T_PathKeyInfo"},
 });
 
 pub fn main(init: std.process.Init) !void {

@@ -192,11 +192,11 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
 
 * Utilities
   * [x] Postgres versions (compile and test)
+    * [x] Postgres 15
     * [x] Postgres 16
     * [x] Postgres 17
     * [x] Postgres 18
     * [ ] Postgres 14
-    * [ ] Postgres 15
   * [x] Logging
   * [x] Error handling
   * [x] Memory context allocators
@@ -279,7 +279,7 @@ the projects folder. If you use direnv you can enable the environment via `diren
 The nix configuration already installs PostgreSQL, but for testing we want to
 have a local postgres installation where we can install our test extensions in.
 
-The development shell provides PostgreSQL 16, 17 and 18. Only one version can be
+The development shell provides PostgreSQL 15, 16, 17 and 18. Only one version can be
 active at a time, so a single `pg_config` on `PATH` dispatches to the selected
 version. Select a version with `pguse` before relocating it:
 
@@ -289,7 +289,7 @@ $ pglocal
 ...
 
 $ ls out
-16  17  default
+15  16  17  default
 ```
 
 We use `pglocal` to relocate the selected installation into our development
@@ -487,7 +487,7 @@ This step will take a while. You will find the compiler and library of your loca
 
 The Zig toolchain, including the compiler, build system, and standard library, is still in development and breaking changes do happen every now and then. This project targets **Zig 0.16**.
 
-The Nix based development shell takes Zig from `nixpkgs` (exposed as `pkgs.zigpkgs.stable` through an overlay), so the `flake.lock` file pins the exact nixpkgs revision, and with it the compiler version. We track `nixpkgs-unstable`, which is also what provides PostgreSQL 16, 17 and 18.
+The Nix based development shell takes Zig from `nixpkgs` (exposed as `pkgs.zigpkgs.stable` through an overlay), so the `flake.lock` file pins the exact nixpkgs revision, and with it the compiler version. We track `nixpkgs-unstable`, which is also what provides PostgreSQL 15, 16, 17 and 18.
 
 The dependency is updated by us every so often and we try to test and fix breaking changes when updating the toolchain version. We highly recommend to use the projects develoment shell when testing the example extensions provided, otherwise you might have problems compiling the extensions at all.
 
