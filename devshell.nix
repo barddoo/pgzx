@@ -33,6 +33,16 @@
     '';
   };
 
+  # Host C headers needed when translating the Postgres headers: libpq-be.h
+  # includes <openssl/ssl.h> and <gssapi.h>. On Linux those come from
+  # /usr/include; with nix (notably on macOS, where the SDK ships no openssl
+  # headers) they live in the store. build.zig reads this variable.
+  pgzxCIncludeDirs = lib.makeSearchPath "include" [
+    (lib.getDev pkgs.openssl)
+    (lib.getDev pkgs.krb5)
+    (lib.getDev pkgs.gss)
+  ];
+
   # Supported PostgreSQL major versions. Only one `pg_config` can be on PATH
   # at a time, so the shell exposes a dispatcher that selects the version from
   # $PG_VERSION, falling back to out/.pgversion (written by `pguse`) and
@@ -103,6 +113,17 @@ in {
     # than the default. For our local setup we must overwrite the default location by using
     # the NIX_PGLIBDIR environment variable.
     export NIX_PGLIBDIR=$PG_HOME/lib
+
+    # Host C headers needed when translating the Postgres headers: libpq-be.h
+    # includes <openssl/ssl.h> and <gssapi.h>. On Linux those come from
+    # /usr/include; with nix (notably on macOS, where the SDK has no openssl
+    # headers) they live in the store. build.zig reads this variable.
+    export PGZX_C_INCLUDE_DIRS=${pgzxCIncludeDirs}
+
+    # Share one Zig build cache across the repo, src/pgzx and every example, so
+    # the expensive translate-c of the Postgres headers is done once per
+    # PostgreSQL version instead of once per project.
+    export ZIG_LOCAL_CACHE_DIR=$HOME/.cache/zig-pgzx
 
     alias root='cd $PRJ_ROOT'
 

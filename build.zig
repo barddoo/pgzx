@@ -61,6 +61,16 @@ pub fn build(b: *std.Build) void {
             .cwd_relative = "/usr/include/aarch64-linux-gnu",
         });
 
+        // Extra host include dirs exported by the dev shell, for platforms where
+        // openssl/krb5 headers are not in /usr/include (e.g. the nix store on
+        // macOS). Colon-separated list, set as PGZX_C_INCLUDE_DIRS.
+        if (b.graph.environ_map.get("PGZX_C_INCLUDE_DIRS")) |dirs| {
+            var it = std.mem.tokenizeScalar(u8, dirs, ':');
+            while (it.next()) |dir| {
+                translate_c.addIncludePath(.{ .cwd_relative = dir });
+            }
+        }
+
         const module = translate_c.createModule();
 
         // Internal C headers
