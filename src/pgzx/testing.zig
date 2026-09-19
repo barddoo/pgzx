@@ -62,7 +62,7 @@ fn runTests(comptime testsuites: anytype) type {
             if (success_count > 0) {
                 elog.Info(@src(), "All tests passed\n", .{});
             } else {
-                elog.Info(@src(), "No tests found\n", .{});
+                return elog.Error(@src(), "No tests found", .{});
             }
 
             return success_count;

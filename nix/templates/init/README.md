@@ -47,7 +47,23 @@ $ psql -U postgres -c 'CREATE EXTENSION my_extension'
 $ psql -U postgres -c 'SELECT hello()'
 ```
 
-7. Stop development server
+7. Run the tests
+
+pgzx provides two test targets out of the box. The unit tests run inside a
+Postgres instance via a generated `run_tests` function:
+
+```
+$ zig build -freference-trace -p $PG_HOME unit
+```
+
+The pg_regress tests run the SQL files in `sql/` and compare their output
+against `expected/`:
+
+```
+$ zig build pg_regress --verbose
+```
+
+8. Stop development server
 
 ```
 $ pgstop

@@ -10,3 +10,14 @@ comptime {
 fn hello() ![:0]const u8 {
     return "Hello, world!";
 }
+
+const Tests = struct {
+    pub fn testHello() !void {
+        const message = try hello();
+        try std.testing.expectEqualStrings("Hello, world!", message);
+    }
+};
+
+comptime {
+    pgzx.testing.registerTests(@import("build_options").testfn, .{Tests});
+}

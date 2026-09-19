@@ -51,6 +51,12 @@ pub const Project = struct {
     options: std.StringArrayHashMapUnmanaged(*Step.Options),
     config: Config,
 
+    // The `build_options` module is passed to every extension library and always
+    // defines `testfn`. It is `false` for the production build, and `true` for
+    // the dedicated unit test library (`test_build_options`).
+    build_options: *Step.Options,
+    test_build_options: *Step.Options,
+
     // C support
     includePaths: std.ArrayList(LazyPath),
     libraryPaths: std.ArrayList(LazyPath),
@@ -86,6 +92,12 @@ pub const Project = struct {
             proj_config.extension_dir = "./extension/";
         }
 
+        const build_options = b.addOptions();
+        build_options.addOption(bool, "testfn", false);
+
+        const test_build_options = b.addOptions();
+        test_build_options.addOption(bool, "testfn", true);
+
         return Project{
             .build = b,
             .pgbuild = pgbuild,
@@ -94,21 +106,32 @@ pub const Project = struct {
             },
             .config = proj_config,
             .options = std.StringArrayHashMapUnmanaged(*Step.Options){},
+            .build_options = build_options,
+            .test_build_options = test_build_options,
             .includePaths = std.ArrayList(LazyPath).empty,
             .libraryPaths = std.ArrayList(LazyPath).empty,
             .cSourcesFiles = std.ArrayList(AddCSourceFilesOptions).empty,
         };
     }
 
-    pub fn extensionLib(proj: Project) *Step.Compile {
+    /// Creates an extension library and configures it with the given
+    /// `build_options`. `name` overrides the project name, which is how the
+    /// unit test library (`{name}_unit`) is produced.
+    fn createLib(proj: Project, name: []const u8, build_options: *Step.Options) *Step.Compile {
         const lib = proj.pgbuild.addExtensionLib(.{
-            .name = proj.config.name,
+            .name = name,
             .version = proj.config.version,
             .root_dir = proj.config.root_dir,
             .root_source_file = proj.build.path(proj.config.root_source_file.?),
         });
+        proj.configureLib(lib, build_options);
+        return lib;
+    }
+
+    fn configureLib(proj: Project, lib: *Step.Compile, build_options: *Step.Options) void {
         var mod = lib.root_module;
         mod.addImport("pgzx", proj.deps.pgzx);
+        mod.addOptions("build_options", build_options);
 
         var it = proj.options.iterator();
         while (it.next()) |kv| {
@@ -124,8 +147,10 @@ pub const Project = struct {
         for (proj.cSourcesFiles.items) |options| {
             mod.addCSourceFiles(options);
         }
+    }
 
-        return lib;
+    pub fn extensionLib(proj: Project) *Step.Compile {
+        return proj.createLib(proj.config.name, proj.build_options);
     }
 
     pub fn installExtensionLib(proj: Project) *Step.InstallFile {
@@ -150,6 +175,118 @@ pub const Project = struct {
 
     pub fn addCSourceFiles(proj: *Project, options: AddCSourceFilesOptions) void {
         proj.cSourcesFiles.append(proj.build.allocator, options) catch unreachable;
+    }
+
+    pub const UnitTestOptions = struct {
+        db_user: ?[]const u8 = null,
+        db_host: ?[]const u8 = null,
+        db_port: ?u16 = null,
+        db_name: ?[]const u8 = null,
+    };
+
+    /// Builds a dedicated `{name}_unit` library with `testfn = true`, installs it
+    /// and returns the step that runs `SELECT run_tests()` against it.
+    ///
+    /// The unit test library is installed under a distinct name so it never
+    /// collides with the production extension library.
+    pub fn addUnitTests(proj: Project, options: UnitTestOptions) *Step.Run {
+        const test_name = std.fmt.allocPrint(proj.build.allocator, "{s}_unit", .{proj.config.name}) catch unreachable;
+
+        const lib = proj.createLib(test_name, proj.test_build_options);
+        const install = proj.pgbuild.addInstallExtensionLibArtifact(lib, test_name);
+
+        const run = proj.pgbuild.addRunTests(.{
+            .name = test_name,
+            .db_user = options.db_user,
+            .db_host = options.db_host,
+            .db_port = options.db_port,
+            .db_name = options.db_name,
+        });
+        run.step.dependOn(&install.step);
+        return run;
+    }
+
+    pub const RegressTestOptions = struct {
+        scripts: []const []const u8,
+
+        root_dir: ?[]const u8 = null,
+
+        db_user: ?[]const u8 = null,
+        db_host: ?[]const u8 = null,
+        db_port: ?u16 = null,
+        db_name: ?[]const u8 = null,
+        debug: bool = false,
+        create_role: ?[]const u8 = null,
+        load_extensions: ?[]const []const u8 = null,
+    };
+
+    /// Adds a pg_regress step for the project, defaulting the input/output/expected
+    /// directories to the project root.
+    pub fn addRegressTests(proj: Project, options: RegressTestOptions) *Step.Run {
+        return proj.pgbuild.addRegress(.{
+            .root_dir = options.root_dir orelse ".",
+            .scripts = options.scripts,
+            .db_user = options.db_user,
+            .db_host = options.db_host,
+            .db_port = options.db_port,
+            .db_name = options.db_name,
+            .debug = options.debug,
+            .create_role = options.create_role,
+            .load_extensions = options.load_extensions,
+        });
+    }
+
+    pub const StepsOptions = struct {
+        check: bool = true,
+        pg_regress: ?RegressTestOptions = null,
+        unit: ?UnitTestOptions = null,
+    };
+
+    pub const Steps = struct {
+        check: *Step,
+        install: *Step,
+        pg_regress: *Step,
+        unit: *Step,
+    };
+
+    /// Sets up the common build steps for an extension project in one call:
+    ///
+    ///   * `check`      - compiles the extension without linking or installing.
+    ///   * `install`    - installs the extension library and directory (the default `zig build`).
+    ///   * `pg_regress` - runs the pg_regress tests (only if `options.pg_regress` is set).
+    ///   * `unit`       - runs the in-server unit tests (only if `options.unit` is set).
+    pub fn addSteps(proj: Project, options: StepsOptions) Steps {
+        const check = proj.build.step("check", "Check if project compiles");
+        const install = proj.build.getInstallStep();
+        const pg_regress = proj.build.step("pg_regress", "Run regression tests");
+        const unit = proj.build.step("unit", "Run unit tests");
+
+        install.dependOn(&proj.installExtensionLib().step);
+        install.dependOn(&proj.installExtensionDir().step);
+
+        if (options.check) {
+            const lib = proj.extensionLib();
+            lib.linkage = null;
+            check.dependOn(&lib.step);
+        }
+
+        if (options.pg_regress) |regress_options| {
+            const regress = proj.addRegressTests(regress_options);
+            regress.step.dependOn(install);
+            pg_regress.dependOn(&regress.step);
+        }
+
+        if (options.unit) |unit_options| {
+            const run = proj.addUnitTests(unit_options);
+            unit.dependOn(&run.step);
+        }
+
+        return .{
+            .check = check,
+            .install = install,
+            .pg_regress = pg_regress,
+            .unit = unit,
+        };
     }
 };
 
@@ -514,6 +651,9 @@ pub fn addRunTests(b: *Build, options: RunTestsOptions) *Step.Run {
     const psql_exe = b.getPsqlPath();
     var runner = b.std_build.addSystemCommand(&[_][]const u8{
         psql_exe,
+        "--no-psqlrc",
+        "-v",
+        "ON_ERROR_STOP=1",
         "-c",
         sql,
     });

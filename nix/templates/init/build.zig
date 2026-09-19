@@ -5,40 +5,22 @@ const std = @import("std");
 const PGBuild = @import("pgzx").Build;
 
 pub fn build(b: *std.Build) void {
-    // Project meta data
-    const name = "my_extension";
-    const version = PGBuild.ExtensionVersion{ .major = 0, .minor = 1 };
-
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    // Load the pgzx module and initialize the build utilities
-    const dep_pgzx = b.dependency("pgzx", .{ .target = target, .optimize = optimize });
-    const pgzx = dep_pgzx.module("pgzx");
-    var pgbuild = PGBuild.create(b, .{ .target = target, .optimize = optimize });
-
-    // Register the dependency with the build system
-    // and add pgzx as module dependency.
-    const ext = pgbuild.addInstallExtension(.{
-        .name = name,
-        .version = version,
-        .root_source_file = b.path("src/main.zig"),
-        .root_dir = ".",
+    const proj = PGBuild.Project.init(b, .{
+        .name = "my_extension",
+        .version = .{ .major = 0, .minor = 1 },
+        .root_dir = "src/",
+        .root_source_file = "src/main.zig",
     });
-    ext.lib.root_module.addImport("pgzx", pgzx);
-    b.getInstallStep().dependOn(&ext.step);
 
-    // Configure pg_regress based testing for the current extension.
-    const extest = pgbuild.addRegress(.{
-        .db_user = "postgres",
-        .db_port = 5432,
-        .root_dir = ".",
-        .scripts = &[_][]const u8{
-            "char_count_test",
+    _ = proj.addSteps(.{
+        .pg_regress = .{
+            .db_user = "postgres",
+            .db_port = 5432,
+            .scripts = &[_][]const u8{"my_extension_test"},
+        },
+        .unit = .{
+            .db_user = "postgres",
+            .db_port = 5432,
         },
     });
-
-    // Make regression tests available to `zig build`
-    var regress = b.step("pg_regress", "Run regression tests");
-    regress.dependOn(&extest.step);
 }
