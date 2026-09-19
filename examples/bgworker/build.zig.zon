@@ -1,0 +1,14 @@
+.{
+    .name = .bgworker,
+    .fingerprint = 0x978d14057869eb24,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

@@ -1,0 +1,5 @@
+# bgworker extension
+comment = 'demonstrates a background worker'
+default_version = '0.1'
+module_pathname = '$libdir/bgworker'
+relocatable = true

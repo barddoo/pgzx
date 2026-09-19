@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const pg = @import("pgzx_pgsys");
 
 const err = @import("err.zig");
@@ -105,3 +107,23 @@ pub inline fn CheckForInterrupts() !void {
         try err.wrap(pg.ProcessInterrupts, .{});
     }
 }
+
+pub const TestSuite_Interrupts = struct {
+    pub fn testSignal() !void {
+        var sig = Signal.new(1);
+        try std.testing.expect(sig.isSet());
+
+        sig.clear();
+        try std.testing.expect(!sig.isSet());
+
+        sig.set(7);
+        try std.testing.expect(sig.isSet());
+        try std.testing.expectEqual(@as(pg.sig_atomic_t, 7), sig.read());
+    }
+
+    pub fn testPendingRead() !void {
+        // Reading pending signal flags is side-effect free.
+        _ = Pending.Interrupt.read();
+        _ = Pending.QueryCancel.read();
+    }
+};

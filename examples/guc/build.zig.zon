@@ -1,0 +1,14 @@
+.{
+    .name = .guc,
+    .fingerprint = 0x342ab9e6919044be,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

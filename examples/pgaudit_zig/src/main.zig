@@ -62,7 +62,7 @@ const settings = struct {
             \\ not be required in the audit log. The default is true.
             ,
             .initial_value = true,
-            .flags = pg.PGC_SUSET,
+            .context = pg.PGC_SUSET,
         });
     }
 };

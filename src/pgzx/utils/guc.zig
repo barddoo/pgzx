@@ -408,6 +408,15 @@ fn testIntAssignHook(newval: c_int, extra: ?*anyopaque) void {
     test_int_assign_value = newval;
 }
 
+fn testIntClampHook(newval: *c_int, extra: *?*anyopaque, source: pg.GucSource) bool {
+    _ = extra;
+    _ = source;
+    if (newval.* < 0) {
+        newval.* = 0;
+    }
+    return true;
+}
+
 pub const TestSuite_Guc = struct {
     pub fn testCustomBoolVariable() !void {
         CustomBoolVariable.registerValue(.{
@@ -432,5 +441,56 @@ pub const TestSuite_Guc = struct {
         pg.SetConfigOption("pgzx.test_int", "42", pg.PGC_USERSET, pg.PGC_S_SESSION);
         try std.testing.expectEqual(@as(c_int, 42), test_int_assign_value);
         try std.testing.expectEqualStrings("42", std.mem.span(pg.GetConfigOption("pgzx.test_int", false, false)));
+    }
+
+    pub fn testCustomIntVariableWithCheckHook() !void {
+        CustomIntVariable.registerValue(.{
+            .name = "pgzx.test_int_check",
+            .short_desc = "pgzx unit test int check",
+            .initial_value = 0,
+            .check_hook = checkIntHook(testIntClampHook),
+        });
+
+        pg.SetConfigOption("pgzx.test_int_check", "-5", pg.PGC_USERSET, pg.PGC_S_SESSION);
+        try std.testing.expectEqualStrings("0", std.mem.span(pg.GetConfigOption("pgzx.test_int_check", false, false)));
+    }
+
+    pub fn testCustomRealVariable() !void {
+        CustomRealVariable.registerValue(.{
+            .name = "pgzx.test_real",
+            .short_desc = "pgzx unit test real",
+            .initial_value = 0.0,
+        });
+
+        pg.SetConfigOption("pgzx.test_real", "2.5", pg.PGC_USERSET, pg.PGC_S_SESSION);
+        try std.testing.expectEqualStrings("2.5", std.mem.span(pg.GetConfigOption("pgzx.test_real", false, false)));
+    }
+
+    pub fn testCustomStringVariable() !void {
+        CustomStringVariable.registerValue(.{
+            .name = "pgzx.test_string",
+            .short_desc = "pgzx unit test string",
+            .initial_value = "hello",
+        });
+
+        try std.testing.expectEqualStrings("hello", std.mem.span(pg.GetConfigOption("pgzx.test_string", false, false)));
+        pg.SetConfigOption("pgzx.test_string", "world", pg.PGC_USERSET, pg.PGC_S_SESSION);
+        try std.testing.expectEqualStrings("world", std.mem.span(pg.GetConfigOption("pgzx.test_string", false, false)));
+    }
+
+    pub fn testCustomEnumVariable() !void {
+        CustomEnumVariable.registerValue(.{
+            .name = "pgzx.test_enum",
+            .short_desc = "pgzx unit test enum",
+            .values = &.{
+                .{ .name = "alpha", .value = 1 },
+                .{ .name = "beta", .value = 2 },
+            },
+            .initial_value = 1,
+        });
+
+        try std.testing.expectEqualStrings("alpha", std.mem.span(pg.GetConfigOption("pgzx.test_enum", false, false)));
+        pg.SetConfigOption("pgzx.test_enum", "beta", pg.PGC_USERSET, pg.PGC_S_SESSION);
+        try std.testing.expectEqualStrings("beta", std.mem.span(pg.GetConfigOption("pgzx.test_enum", false, false)));
     }
 };

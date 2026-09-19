@@ -1,0 +1,13 @@
+\echo Use "CREATE EXTENSION guc" to load this file. \quit
+
+CREATE FUNCTION guc_bool() RETURNS TEXT
+AS '$libdir/guc' LANGUAGE C STABLE;
+
+CREATE FUNCTION guc_int() RETURNS INTEGER
+AS '$libdir/guc' LANGUAGE C STABLE;
+
+CREATE FUNCTION guc_string() RETURNS TEXT
+AS '$libdir/guc' LANGUAGE C STABLE;
+
+CREATE FUNCTION guc_enum() RETURNS TEXT
+AS '$libdir/guc' LANGUAGE C STABLE;

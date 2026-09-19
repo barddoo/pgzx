@@ -1,0 +1,60 @@
+CREATE EXTENSION guc;
+SELECT guc_bool();
+ guc_bool 
+----------
+ off
+(1 row)
+
+SELECT guc_int();
+ guc_int 
+---------
+      42
+(1 row)
+
+SELECT guc_string();
+ guc_string 
+------------
+ hello
+(1 row)
+
+SELECT guc_enum();
+ guc_enum 
+----------
+ medium
+(1 row)
+
+SET guc.sample_bool = on;
+SELECT guc_bool();
+ guc_bool 
+----------
+ on
+(1 row)
+
+SET guc.sample_int = -5;
+SELECT guc_int();
+ guc_int 
+---------
+       0
+(1 row)
+
+SET guc.sample_int = 500;
+SELECT guc_int();
+ guc_int 
+---------
+     100
+(1 row)
+
+SET guc.sample_string = 'world';
+SELECT guc_string();
+ guc_string 
+------------
+ world
+(1 row)
+
+SET guc.sample_enum = 'large';
+SELECT guc_enum();
+ guc_enum 
+----------
+ large
+(1 row)
+

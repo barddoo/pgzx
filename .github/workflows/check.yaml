@@ -21,6 +21,15 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Cache Zig cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/zig-pgzx
+            ~/.cache/zig
+          key: zig-cache-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon', 'src/pgzx/c/include/headers.h', 'src/pgzx/c/translate.c', 'src/pgzx/c/libpqsrv.c') }}
+          restore-keys: |
+            zig-cache-${{ runner.os }}-
       - name: Init Nix environment
         run:
           nix develop --command -- echo "Done"

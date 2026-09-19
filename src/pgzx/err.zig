@@ -188,3 +188,16 @@ inline fn wrap_ret(comptime f: type) type {
     }
     return ti.@"fn".return_type.?;
 }
+
+pub const TestSuite_Err = struct {
+    pub fn testCaptureNoError() !void {
+        var ctx = Context.init();
+        defer ctx.deinit();
+        try std.testing.expect(ctx.pg_try());
+    }
+
+    pub fn testWrapSuccess() !void {
+        const result = try wrap(pg.MemoryContextSwitchTo, .{pg.CurrentMemoryContext});
+        try std.testing.expectEqual(pg.CurrentMemoryContext, result);
+    }
+};

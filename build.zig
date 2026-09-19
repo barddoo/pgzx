@@ -12,6 +12,8 @@ pub fn build(b: *std.Build) void {
     });
 
     const steps = .{
+        .check = b.step("check", "Check if project compiles"),
+        .test_pure = b.step("test", "Run pure-Zig tests (no Postgres server)"),
         .docs = b.step("docs", "Generate documentation"),
         .serve_docs = b.step("serve_docs", "Docs HTTP server http://localhost:8080/#docs.pgzx"),
 
@@ -144,6 +146,10 @@ pub fn build(b: *std.Build) void {
             .name = "docs",
             .root_module = pgzx,
         });
+
+        // `check` compiles the module without installing or generating docs.
+        steps.check.dependOn(&obj.step);
+
         const install_docs = b.addInstallDirectory(.{
             .source_dir = obj.getEmittedDocs(),
             .install_dir = .prefix,
@@ -158,8 +164,10 @@ pub fn build(b: *std.Build) void {
             "cp", "-fr", "./zig-out/share/pgzx/docs", ".",
         });
 
+        // Only delete the checked-in docs after the build succeeds, so a
+        // failed build never leaves `./docs` empty.
+        del_docs.step.dependOn(&install_docs.step);
         copy_docs.step.dependOn(&del_docs.step);
-        copy_docs.step.dependOn(&install_docs.step);
         steps.docs.dependOn(&copy_docs.step);
 
         // Use python to serve the docs via http.
@@ -168,6 +176,21 @@ pub fn build(b: *std.Build) void {
         });
         serve_docs.step.dependOn(&copy_docs.step);
         steps.serve_docs.dependOn(&serve_docs.step);
+    }
+
+    // Pure-Zig tests: run under `zig test` for modules that do not depend on a
+    // live Postgres server (e.g. `meta`). Fast feedback, no PG required.
+    {
+        const pure_test_module = b.createModule(.{
+            .root_source_file = b.path("src/pure_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const pure_tests = b.addTest(.{
+            .root_module = pure_test_module,
+        });
+        const run_pure_tests = b.addRunArtifact(pure_tests);
+        steps.test_pure.dependOn(&run_pure_tests.step);
     }
 
     // Unit test extension

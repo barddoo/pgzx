@@ -311,3 +311,24 @@ fn checkStatus(st: c_int) err.PGError!void {
         },
     }
 }
+
+pub const TestSuite_Spi = struct {
+    pub fn testExecSelect() !void {
+        try connect();
+        defer finish();
+
+        const count = try exec("SELECT 1", .{});
+        try std.testing.expectEqual(@as(isize, 1), count);
+    }
+
+    pub fn testQueryTyped() !void {
+        try connect();
+        defer finish();
+
+        var rows = try queryTyped(i32, "SELECT 42::int4", .{});
+        defer rows.deinit();
+
+        const value = (try rows.next()) orelse unreachable;
+        try std.testing.expectEqual(@as(i32, 42), value);
+    }
+};

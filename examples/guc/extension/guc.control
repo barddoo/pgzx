@@ -1,0 +1,5 @@
+# guc extension
+comment = 'demonstrates custom GUC variables'
+default_version = '0.1'
+module_pathname = '$libdir/guc'
+relocatable = true

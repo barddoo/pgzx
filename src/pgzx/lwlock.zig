@@ -67,3 +67,13 @@ pub const WaitEventExtension = mainLock(48);
 pub const WALSummarizer = mainLock(49);
 pub const DSMRegistry = mainLock(50);
 pub const InjectionPoint = mainLock(51);
+
+pub const TestSuite_LWLock = struct {
+    pub fn testAcquireRelease() !void {
+        _ = pg.LWLockAcquire(ProcArray(), pg.LW_EXCLUSIVE);
+        pg.LWLockRelease(ProcArray());
+
+        _ = pg.LWLockAcquire(ShmemIndex(), pg.LW_SHARED);
+        pg.LWLockRelease(ShmemIndex());
+    }
+};

@@ -322,3 +322,31 @@ pub inline fn useStringPointer(oid: pg.Oid) bool {
         else => false,
     };
 }
+
+pub const TestSuite_Datum = struct {
+    pub fn testInt32RoundTrip() !void {
+        const value: i32 = 12345;
+        const d = try toNullableDatum(value);
+        try std.testing.expectEqual(false, d.isnull);
+        try std.testing.expectEqual(value, try fromNullableDatum(i32, d));
+    }
+
+    pub fn testBoolRoundTrip() !void {
+        const value = true;
+        const d = try toNullableDatum(value);
+        try std.testing.expectEqual(false, d.isnull);
+        try std.testing.expectEqual(value, try fromNullableDatum(bool, d));
+    }
+
+    pub fn testTextRoundTrip() !void {
+        const value: [:0]const u8 = "hello world";
+        const d = try toNullableDatum(value);
+        try std.testing.expectEqual(false, d.isnull);
+        try std.testing.expectEqualStrings("hello world", try fromNullableDatum([:0]const u8, d));
+    }
+
+    pub fn testOptionalNull() !void {
+        const d = try toNullableDatum(@as(?i32, null));
+        try std.testing.expectEqual(true, d.isnull);
+    }
+};

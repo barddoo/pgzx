@@ -615,3 +615,10 @@ fn sendElogWithCause(src: SourceLocation, comptime level: c_int, cause: anyerror
 
     api.errfinish(src, .{ .allow_longjmp = true }) catch unreachable;
 }
+
+pub const TestSuite_Elog = struct {
+    pub fn testLogLevels() !void {
+        Log(@src(), "pgzx unit test log message", .{});
+        Info(@src(), "pgzx unit test info message {d}", .{1});
+    }
+};
