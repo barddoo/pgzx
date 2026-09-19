@@ -256,6 +256,7 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
   * [x] String formatting
   * [x] Shared memory
   * [x] SPI
+  * [x] GUCs (custom variables)
   * Postgres data structures wrappers:
     * Array based list (List)
         * [x] Pointer list

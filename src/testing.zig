@@ -15,6 +15,7 @@ comptime {
             pgzx.mem.TestSuite_Mem,
             pgzx.node.TestSuite_Node,
             pgzx.shmem.TestSuite_Shmem,
+            pgzx.guc.TestSuite_Guc,
         },
     );
 }
