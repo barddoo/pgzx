@@ -1,0 +1,14 @@
+.{
+    .name = .rational,
+    .fingerprint = 0xbbe922d40c1a2503,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

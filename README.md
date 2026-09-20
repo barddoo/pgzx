@@ -31,6 +31,7 @@ The following sample extensions (ordered from simple to complex) show how to use
 | [char_count_zig](examples/char_count_zig/) | Adds a function that counts how many times a particular character shows up in a string. Shows how to register a function and how to interpret the parameters. |
 | [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name. |
 | [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns. |
+| [rational](examples/rational/)             | A `rational` base type with btree and hash operator classes. Shows the type system end to end: `pg_type`, operators, `pg_opclass`, casts and how they make indexes and `GROUP BY` work. |
 
 ## Docs
 
@@ -144,6 +145,60 @@ comptime {
 
 The parameters are received from Postgres serialized, but pgzx automatically deserializes them into Zig types.
 
+### SQL schema generation
+
+Instead of hand-writing the versioned extension script (`<name>--<version>.sql`),
+you can describe your SQL objects in a comptime declaration and let `zig build`
+render the script for you. The declaration lives in `src/schema.zig` by
+convention and is conventionally named `pgzx_sql`:
+
+```zig
+const functions = @import("functions.zig");
+
+pub const pgzx_sql = .{
+    .functions = .{
+        .{ .name = "char_count_zig", .func = functions.char_count_zig },
+    },
+};
+```
+
+Then enable the `schema` step in `build.zig`:
+
+```zig
+_ = proj.addSteps(.{
+    .schema = .{},
+    // ...
+});
+```
+
+`zig build` (or `zig build sql`) now compiles a small generator, renders the
+SQL, and installs it next to the `.control` file, so `CREATE EXTENSION` picks
+it up. Argument types are derived from the Zig function signatures through the
+`pgzx.datum` type converters: for example `i32` becomes `integer`, `[]const u8`
+becomes `text`, and an optional argument makes no difference to the SQL type. A
+`pg.FunctionCallInfo` parameter is treated as the fmgr context and is not
+emitted as an SQL argument.
+
+Per-function options:
+
+| Option       | Meaning                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| `name`       | SQL function name (required).                                            |
+| `func`       | The Zig function (required).                                             |
+| `volatility` | `pgzx.ddl.Volatility`: `.@"volatile"` (default), `.stable`, `.immutable`. |
+| `strict`     | Emit `STRICT` (default `false`).                                         |
+| `parallel`   | `pgzx.ddl.Parallel`: `.unsafe`, `.restricted`, `.safe`.                  |
+| `args`       | Override argument SQL types, e.g. `&.{"text", "integer"}`.               |
+| `returns`    | Override the return SQL type.                                            |
+| `comment`    | Emit a `COMMENT ON FUNCTION`.                                            |
+
+Use `args`/`returns` for signatures that have no direct SQL mapping, such as
+raw `pg.Datum` arguments. The schema module must not call
+`PG_FUNCTION_V1`/`PG_EXPORT` directly (keep those in `main.zig`): the generator
+is linked as a standalone executable and cannot resolve Postgres server
+symbols. See `examples/sqlfns` and `examples/char_count_zig` for the complete
+pattern.
+
 ### Testing your extension
 
 pgzx provides two types of automatic tests: pg_regress tests and unit tests, both
@@ -250,6 +305,7 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
   * [x] Error handling
   * [x] Memory context allocators
   * [x] Function manager
+  * [x] SQL/DDL generation
   * [x] Background worker process
   * [x] LWLocks
   * [x] Signals and interrupts

@@ -1,0 +1,6 @@
+# rational extension
+comment = 'pgzx: a rational number base type with btree and hash opclasses'
+default_version = '0.1'
+module_pathname = '$libdir/rational'
+relocatable = false
+schema = 'rational'

@@ -6,7 +6,7 @@ const PGBuild = @import("pgzx").Build;
 
 pub fn build(b: *std.Build) void {
     const proj = PGBuild.Project.init(b, .{
-        .name = "sqlfns",
+        .name = "rational",
         .version = .{ .major = 0, .minor = 1 },
         .root_dir = "src/",
         .root_source_file = "src/main.zig",
@@ -17,7 +17,11 @@ pub fn build(b: *std.Build) void {
         .pg_regress = .{
             .db_user = "postgres",
             .db_port = 5432,
-            .scripts = &[_][]const u8{"sqlfns_test"},
+            .scripts = &[_][]const u8{"rational_test"},
+        },
+        .unit = .{
+            .db_user = "postgres",
+            .db_port = 5432,
         },
     });
 }

@@ -32,14 +32,23 @@ pub const PGCurrentContextAllocator: std.mem.Allocator = .{
 fn pgAlloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
     _ = ret_addr;
     _ = ctx;
-    // PG15 has no aligned allocation API; fall back to the plain context
-    // alloc. ponytail: alignments >8 (MAXALIGN) are not honored on PG15 —
-    // fine for extension structs, revisit if SIMD-typed allocations appear.
+
+    // `palloc` already returns MAXALIGN-ed memory on every supported version,
+    // so requests up to MAXIMUM_ALIGNOF don't need the aligned API (which has
+    // extra bookkeeping). This is the common case for extension structs.
+    //
+    // PG15 has no aligned allocation API at all; over-aligned requests fall
+    // back to the plain context alloc and are not honored (the same limitation
+    // as before). On PG16+ over-aligned requests use `palloc_aligned` with the
+    // alignment in *bytes*.
+    const maxalign: usize = @intCast(pg.MAXIMUM_ALIGNOF);
+    const align_bytes = ptr_align.toByteUnits();
     if (comptime pg.PG_VERSION_NUM >= 160000) {
-        return @ptrCast(pg.palloc_aligned(len, @intFromEnum(ptr_align), pg.MCXT_ALLOC_NO_OOM));
-    } else {
-        return @ptrCast(pg.MemoryContextAllocExtended(pg.CurrentMemoryContext, len, pg.MCXT_ALLOC_NO_OOM));
+        if (align_bytes > maxalign) {
+            return @ptrCast(pg.palloc_aligned(len, align_bytes, pg.MCXT_ALLOC_NO_OOM));
+        }
     }
+    return @ptrCast(pg.MemoryContextAllocExtended(pg.CurrentMemoryContext, len, pg.MCXT_ALLOC_NO_OOM));
 }
 
 fn pgFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {

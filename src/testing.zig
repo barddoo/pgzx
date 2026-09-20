@@ -12,6 +12,7 @@ comptime {
             pgzx.collections.htab.TestSuite_HTab,
 
             pgzx.datum.TestSuite_Datum,
+            pgzx.ddl.TestSuite_Ddl,
             pgzx.err.TestSuite_Err,
             pgzx.elog.TestSuite_Elog,
             pgzx.intr.TestSuite_Interrupts,

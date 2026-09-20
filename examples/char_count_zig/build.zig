@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     });
 
     _ = proj.addSteps(.{
+        .schema = .{},
         .pg_regress = .{
             .db_user = "postgres",
             .db_port = 5432,

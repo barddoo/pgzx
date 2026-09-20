@@ -177,6 +177,109 @@ pub const Project = struct {
         proj.cSourcesFiles.append(proj.build.allocator, options) catch unreachable;
     }
 
+    pub const SchemaOptions = struct {
+        /// Source file holding the comptime SQL schema declaration. It must not
+        /// force any PostgreSQL symbol to be emitted (in particular it must not
+        /// call `PG_FUNCTION_V1`/`PG_EXPORT`), because the generator is linked
+        /// as an executable and cannot resolve server symbols. Defaults to
+        /// `<root_dir>/schema.zig`.
+        source: ?[]const u8 = null,
+        /// Name of the comptime declaration in `source` that describes the SQL
+        /// schema (see `pgzx.ddl`).
+        declaration: []const u8 = "pgzx_sql",
+        /// Output file name. Defaults to `{name}--{version}.sql`.
+        file_name: ?[]const u8 = null,
+        /// Destination extension directory (relative to the install prefix) to
+        /// install the generated script into. Defaults to the PostgreSQL
+        /// extension directory reported by `pg_config`.
+        extension_dir: ?[]const u8 = null,
+    };
+
+    /// Compiles and runs a small generator that renders the extension's SQL
+    /// schema (see `pgzx.ddl`) and installs the result as the versioned
+    /// extension script (`<name>--<version>.sql`).
+    ///
+    /// The generator imports `options.source` as the `schema` module and reads
+    /// the declaration named by `options.declaration`.
+    pub fn addSchema(proj: Project, options: SchemaOptions) *Step.InstallFile {
+        const b = proj.build;
+
+        const file_name = options.file_name orelse b.fmt("{s}--{d}.{d}.sql", .{
+            proj.config.name,
+            proj.config.version.major,
+            proj.config.version.minor,
+        });
+
+        const source = options.source orelse b.pathJoin(&[_][]const u8{ proj.config.root_dir, "schema.zig" });
+
+        // The generator cannot link against the Postgres server, so the schema
+        // module must only rely on comptime metadata. It is linked, stripped,
+        // and optimized so that function bodies reachable only through the
+        // schema declaration are discarded.
+        const schema_module = b.createModule(.{
+            .root_source_file = b.path(source),
+            .target = proj.pgbuild.options.target,
+            .optimize = .ReleaseSmall,
+            .strip = true,
+        });
+        schema_module.addImport("pgzx", proj.deps.pgzx);
+        schema_module.addOptions("build_options", proj.build_options);
+        for (proj.includePaths.items) |path| {
+            schema_module.addIncludePath(path);
+        }
+        var opt_it = proj.options.iterator();
+        while (opt_it.next()) |kv| {
+            schema_module.addOptions(kv.key_ptr.*, kv.value_ptr.*);
+        }
+
+        const generator_source = b.fmt(
+            \\const std = @import("std");
+            \\const pgzx = @import("pgzx");
+            \\const schema = @import("schema");
+            \\
+            \\pub fn main(init: std.process.Init) !void {{
+            \\    var buffer: [64 * 1024]u8 = undefined;
+            \\    var stdout_writer = std.Io.File.stdout().writer(init.io, &buffer);
+            \\    const stdout = &stdout_writer.interface;
+            \\    try pgzx.ddl.render(stdout, schema.{s});
+            \\    try stdout.flush();
+            \\}}
+            \\
+        , .{options.declaration});
+
+        const write_files = b.addWriteFiles();
+        const generator_file = write_files.add("pgzx_generate_sql.zig", generator_source);
+
+        const generator_module = b.createModule(.{
+            .root_source_file = generator_file,
+            .target = proj.pgbuild.options.target,
+            // The generator only needs comptime metadata, but linking it as a
+            // normal Debug build would drag in debug info for the extension's
+            // function bodies, which reference Postgres server symbols that an
+            // executable cannot resolve. Build it stripped and optimized so
+            // dead code (and its debug info) is discarded.
+            .optimize = .ReleaseSmall,
+            .strip = true,
+        });
+        generator_module.addImport("pgzx", proj.deps.pgzx);
+        generator_module.addImport("schema", schema_module);
+
+        const generator = b.addExecutable(.{
+            .name = "pgzx_generate_sql",
+            .root_module = generator_module,
+        });
+
+        const run = b.addRunArtifact(generator);
+        const generated_sql = run.captureStdOut(.{ .basename = file_name });
+
+        const ext_dir = options.extension_dir orelse proj.pgbuild.getExtensionDir();
+        return b.addInstallFileWithDir(
+            generated_sql,
+            .prefix,
+            b.pathJoin(&[_][]const u8{ ext_dir, file_name }),
+        );
+    }
+
     pub const UnitTestOptions = struct {
         db_user: ?[]const u8 = null,
         db_host: ?[]const u8 = null,
@@ -238,6 +341,7 @@ pub const Project = struct {
 
     pub const StepsOptions = struct {
         check: bool = true,
+        schema: ?SchemaOptions = null,
         pg_regress: ?RegressTestOptions = null,
         unit: ?UnitTestOptions = null,
     };
@@ -245,6 +349,7 @@ pub const Project = struct {
     pub const Steps = struct {
         check: *Step,
         install: *Step,
+        schema: ?*Step,
         pg_regress: *Step,
         unit: *Step,
     };
@@ -258,11 +363,20 @@ pub const Project = struct {
     pub fn addSteps(proj: Project, options: StepsOptions) Steps {
         const check = proj.build.step("check", "Check if project compiles");
         const install = proj.build.getInstallStep();
+        const sql = proj.build.step("sql", "Generate the SQL extension script");
         const pg_regress = proj.build.step("pg_regress", "Run regression tests");
         const unit = proj.build.step("unit", "Run unit tests");
 
         install.dependOn(&proj.installExtensionLib().step);
         install.dependOn(&proj.installExtensionDir().step);
+
+        var schema_step: ?*Step = null;
+        if (options.schema) |schema_options| {
+            const install_sql = proj.addSchema(schema_options);
+            install.dependOn(&install_sql.step);
+            sql.dependOn(&install_sql.step);
+            schema_step = sql;
+        }
 
         if (options.check) {
             const lib = proj.extensionLib();
@@ -284,6 +398,7 @@ pub const Project = struct {
         return .{
             .check = check,
             .install = install,
+            .schema = schema_step,
             .pg_regress = pg_regress,
             .unit = unit,
         };

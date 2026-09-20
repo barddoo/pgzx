@@ -36,6 +36,10 @@ pub fn Conv(comptime context: type) type {
     return struct {
         pub const Type = context.Type;
 
+        /// SQL name used when generating DDL for this type. `null` means the
+        /// type has no direct SQL representation (e.g. `Datum`).
+        pub const sql_name: ?[]const u8 = if (@hasDecl(context, "sql_name")) context.sql_name else null;
+
         const Self = @This();
 
         pub fn fromNullableDatum(d: pg.NullableDatum) !Type {
@@ -65,6 +69,7 @@ pub fn Conv(comptime context: type) type {
 pub fn ConvNoFail(comptime context: type) type {
     return Conv(struct {
         pub const Type = context.Type;
+        pub const sql_name = if (@hasDecl(context, "sql_name")) context.sql_name else null;
 
         pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
             return context.from(d, oid);
@@ -76,9 +81,15 @@ pub fn ConvNoFail(comptime context: type) type {
     });
 }
 
-pub fn SimpleConv(comptime T: type, comptime from_datum: anytype, comptime to_datum: anytype) type {
+pub fn SimpleConv(
+    comptime T: type,
+    comptime from_datum: anytype,
+    comptime to_datum: anytype,
+    comptime sql_type_name: ?[]const u8,
+) type {
     return ConvNoFail(struct {
         pub const Type = T;
+        pub const sql_name = sql_type_name;
 
         pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
             _ = oid;
@@ -96,6 +107,7 @@ pub fn SimpleConv(comptime T: type, comptime from_datum: anytype, comptime to_da
 pub fn OptConv(comptime C: anytype) type {
     return struct {
         pub const Type = ?C.Type;
+        pub const sql_name = if (@hasDecl(C, "sql_name")) C.sql_name else null;
 
         const Self = @This();
 
@@ -203,32 +215,45 @@ inline fn isConv(comptime T: type) bool {
     return @hasDecl(T, "Type") and @hasDecl(T, "fromNullableDatum") and @hasDecl(T, "toNullableDatum");
 }
 
+/// Returns the PostgreSQL SQL type name for a Zig type. The mapping is derived
+/// from the type's converter and is used to generate DDL. Types without a SQL
+/// representation (for example a raw `pg.Datum`) produce a compile error.
+pub fn sqlType(comptime T: type) []const u8 {
+    const C = findConv(T);
+    if (@hasDecl(C, "sql_name")) {
+        if (C.sql_name) |name| return name;
+    }
+    @compileError("pgzx.datum: no SQL type mapping for Zig type " ++ @typeName(T));
+}
+
 inline fn normalizeOid(oid: ?pg.Oid) pg.Oid {
     return oid orelse pg.InvalidOid;
 }
 
-pub const Void = SimpleConv(void, idDatum, toVoid);
-pub const Bool = SimpleConv(bool, pg.DatumGetBool, pg.BoolGetDatum);
-pub const Int8 = SimpleConv(i8, datumGetInt8, pg.Int8GetDatum);
-pub const Int16 = SimpleConv(i16, pg.DatumGetInt16, pg.Int16GetDatum);
-pub const Int32 = SimpleConv(i32, pg.DatumGetInt32, pg.Int32GetDatum);
-pub const Int64 = SimpleConv(i64, pg.DatumGetInt64, pg.Int64GetDatum);
-pub const UInt8 = SimpleConv(u8, pg.DatumGetUInt8, pg.UInt8GetDatum);
-pub const UInt16 = SimpleConv(u16, pg.DatumGetUInt16, pg.UInt16GetDatum);
-pub const UInt32 = SimpleConv(u32, pg.DatumGetUInt32, pg.UInt32GetDatum);
-pub const UInt64 = SimpleConv(u64, pg.DatumGetUInt64, pg.UInt64GetDatum);
-pub const Float32 = SimpleConv(f32, pg.DatumGetFloat4, pg.Float4GetDatum);
-pub const Float64 = SimpleConv(f64, pg.DatumGetFloat8, pg.Float8GetDatum);
-pub const PGDatum = SimpleConv(pg.Datum, idDatum, idDatum);
+pub const Void = SimpleConv(void, idDatum, toVoid, "void");
+pub const Bool = SimpleConv(bool, pg.DatumGetBool, pg.BoolGetDatum, "boolean");
+pub const Int8 = SimpleConv(i8, datumGetInt8, pg.Int8GetDatum, "smallint");
+pub const Int16 = SimpleConv(i16, pg.DatumGetInt16, pg.Int16GetDatum, "smallint");
+pub const Int32 = SimpleConv(i32, pg.DatumGetInt32, pg.Int32GetDatum, "integer");
+pub const Int64 = SimpleConv(i64, pg.DatumGetInt64, pg.Int64GetDatum, "bigint");
+pub const UInt8 = SimpleConv(u8, pg.DatumGetUInt8, pg.UInt8GetDatum, "smallint");
+pub const UInt16 = SimpleConv(u16, pg.DatumGetUInt16, pg.UInt16GetDatum, "integer");
+pub const UInt32 = SimpleConv(u32, pg.DatumGetUInt32, pg.UInt32GetDatum, "bigint");
+pub const UInt64 = SimpleConv(u64, pg.DatumGetUInt64, pg.UInt64GetDatum, "bigint");
+pub const Float32 = SimpleConv(f32, pg.DatumGetFloat4, pg.Float4GetDatum, "real");
+pub const Float64 = SimpleConv(f64, pg.DatumGetFloat8, pg.Float8GetDatum, "double precision");
+pub const PGDatum = SimpleConv(pg.Datum, idDatum, idDatum, null);
 
 pub const SliceU8Z = Conv(struct {
     pub const Type = [:0]const u8;
+    pub const sql_name = "text";
     pub const from = getDatumStringLikeZ;
     pub const to = sliceToDatumStringLikeZ;
 });
 
 pub const SliceU8 = Conv(struct {
     pub const Type = []const u8;
+    pub const sql_name = "text";
     pub const from = getDatumStringLikeZ;
     pub const to = sliceToDatumStringLike;
 });
