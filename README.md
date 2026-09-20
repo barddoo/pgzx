@@ -12,15 +12,13 @@
 
 # pgzx - Create Postgres Extensions with Zig!
 
-`pgzx` is a library for developing PostgreSQL extensions written in Zig. It provides a set of utilities (e.g. error handling, memory allocators, wrappers) as well as a development environment that simplifies integrating with the Postgres code base.
+`pgzx` is a library for developing PostgreSQL extensions written in Zig. It provides utilities (error handling, memory allocators, wrappers) and a development environment that simplify integrating with the Postgres code base.
 
 ## Why Zig?
 
-[Zig](https://ziglang.org/) is a small and simple language that aims to be a "modern C" and make system-level code bases easier to maintain. It provides safe memory management, compilation time code execution (comptime), and a rich standard library.
+[Zig](https://ziglang.org/) is a small, simple language that aims to be a "modern C" with safe memory management, compile-time execution (comptime), and a rich standard library. It speaks the C ABI, works with C pointers and types directly, and can import and translate C headers — so a Zig extension can do anything a C extension can, with a modern language on top.
 
-Zig can interact with C code quite naturally: it supports the C ABI, can work with C pointers and types directly, it can import header files and even translate C code to Zig code. Thanks to this interoperability, a Postgres extension written in Zig can, theoretically, accomplish anything that a C extension can. This means you get full power AND a modern language and standard library to write your extension.
-
-While in theory you can write any extension in Zig that you could in C, in practice you will need to make sense of a lot of Postgres internals in order to know how to correctly use them from Zig. Also, Postgres makes extensive use of macros, and not all of them can be translated automatically. This is where pgzx comes in: it provides a set of Zig modules that make the development of Postgres Extensions in Zig much simpler.
+In practice you still need to understand a lot of Postgres internals, and Postgres leans on macros that cannot always be translated automatically. pgzx provides the Zig modules for those cases.
 
 ## Examples
 
@@ -35,18 +33,11 @@ The following sample extensions (ordered from simple to complex) show how to use
 
 ## Docs
 
-
-The reference documentation is available at [here](https://xataio.github.io/pgzx/#docs.pgzx).
-
-We recommend checking the examples in the section above to understand how to use pgzx. The next sections contain a high-level walkthrough of the most important utilities and how they relate to the Postgres internals.
+The reference documentation is available at [here](https://xataio.github.io/pgzx/#docs.pgzx). The examples above are the best place to start; the sections below walk through the most important utilities.
 
 ### Getting Started
 
-This project uses [Nix flakes](https://nixos.wiki/wiki/Flakes) to manage build dependencies and provide a development shell. We provide a template for you to initialize a new Zig based Postgres extension project which allows you to reuse some of the utilities we're using.
-
-Before getting started we would recommend you familiarize yourself with the projects setup first. To do so, please start with the [Contributing](#contributing) section.   
-
-We will create a new project folder for our new extension and initialize the folder using the projects template:
+This project uses [Nix flakes](https://nixos.wiki/wiki/Flakes) to manage build dependencies and provide a development shell. A template bootstraps a new extension:
 
 ```
 $ mkdir my_extension
@@ -54,103 +45,87 @@ $ cd my_extension
 $ nix flake init -t github:xataio/pgzx
 ```
 
-This step will create a working extension named 'my_extension'. The extension exports a hello world function named `hello()`.
+This creates a working extension named `my_extension` exporting a `hello()` function. Its [README](./nix/templates/init/README.md) explains how to enter the shell, build, and test it. Rename the project by updating the files in `extension/` and replacing `my_extension` in `README.md`, `build.zig`, `build.zig.zon`, and the extension SQL file.
 
-The templates [README.md](./nix/templates/init/README.md) file already contains instructions on how to enter the development shell, build, and test the extension. You can follow the instructions and verify that your setup is functioning. Do not forget to use `pgstop` before quitting the development shell.
-
-The development shell declares a few environment variables used by the project (see [devshell.nix](./devshell.nix)):
-- `PRJ_ROOT`: folder of the current project. If not set some shell scripts will
-  ask `git` to find the projects folder. Some scripts use this environment variable to ensure that you can run the script from within any folder within your project.
-- `PG_HOME`: Installation path of your postgres instance. When building postgres from scratch this matches the 
-path prefix used by `make install`. When using the development shell we will relocate/build the postgres extension into the `./out` folder and create a symlink `./out/default` to the local version. If you plan to build and install the extension with another PostgreSQL installation set `PG_HOME=$(dirname $(pg_config --bindir))`.
-
-
-Next we want to rename the project to match our extension name. To do so, update the file names in the `extension` folder, and replace `my_extension` with your project name in the `README.md`, `build.zig`, `build.zig.zon`, and extensions SQL file.
+The development shell sets the environment used by the project (see [devshell.nix](./devshell.nix)): `PRJ_ROOT` is the project folder, and `PG_HOME` is the Postgres install prefix (the shell relocates Postgres into `./out` and points `./out/default` at the active version). For a complete local setup guide see [HACKING.md](HACKING.md).
 
 ### Logging and error handling
 
-Postgres [error reporting functions](https://www.postgresql.org/docs/current/error-message-reporting.html) are used to report errors and log messages. They have typical logging functionality like log levels and formatting, but also Postgres specific functionality, like error reports that can be thrown and caught like exceptions. `pgzx` provides a wrapper around these functions that makes it easier to use from Zig.
+Postgres [error reporting functions](https://www.postgresql.org/docs/current/error-message-reporting.html) provide log levels, formatting, and errors that can be thrown and caught like exceptions. pgzx wraps them for Zig.
 
-Simple logging can be done with functions like [Log][docs_Log], [Info][docs_Info], [Notice][docs_Notice], [Warning][docs_Warning], for example:
-
-```zig
-    elog.Info(@src(), "input_text: {s}\n", .{input_text});
-```
-
-Note the `@src()` built-in which provides the file location. This will be stored in the error report.
-
-To report errors during execution, use the [Error][docs_Error] or [ErrorThrow][docs_ErrorThrow] functions. The latter will throw an error report, which can be caught by the Postgres error handling system (explained below). Example with `Error`:
+Simple logging uses [Log][docs_Log], [Info][docs_Info], [Notice][docs_Notice] or [Warning][docs_Warning]:
 
 ```zig
-    if (target_char.len > 1) {
-        return elog.Error(@src(), "Target char is more than one byte", .{});
-    }
+elog.Info(@src(), "input_text: {s}\n", .{input_text});
 ```
 
-The elog module also exports functions that resemble the C API including functions like `ereport`, `errcode`, or `errmsg`.
+The `@src()` built-in records the file location in the error report.
 
-If you browse through the Postgres source code, you'll see the [PG_TRY / PG_CATCH / PG_FINALLY](https://github.com/postgres/postgres/blob/master/src/include/utils/elog.h#L318) macros used as a form of "exception handling" in C, catching errors raised by the [ereport](https://www.postgresql.org/docs/current/error-message-reporting.html) family of functions. These macros make use of long jumps (i.e. jumps across function boundaries) to the "catch/finally" destination. This means we need to be careful when calling Postgres functions from Zig. For example, if the called C function raises an `ereport` error, the long jump might skip the Zig code that would have cleaned up resources (e.g. `errdefer`).
-
-pgzx offers an alternative Zig implementation for the PG_TRY family of macros. This typically looks in code something like this:
+To report errors, use [Error][docs_Error] (returns a Zig error) or [ErrorThrow][docs_ErrorThrow] (throws a Postgres error report):
 
 ```zig
-    var errctx = pgzx.err.Context.init();
-    defer errctx.deinit();
-    if (errctx.pg_try()) {
-        // zig code that calls several Postgres C functions.
-    } else {
-        return errctx.errorValue();
-    }
+if (target_char.len > 1) {
+    return elog.Error(@src(), "Target char is more than one byte", .{});
+}
 ```
 
-The above code pattern makes sure that we catch any errors raised by Postgres functions and return them as Zig errors. This way, we make sure that all the `defer` and `errdefer` code in the caller(s) are executed as expected. For more details, see the documentation for the [pgzx.err.Context][docs_Context] struct.
+The module also exposes the C-style API (`ereport`, `errcode`, `errmsg`, ...).
 
-The above code pattern is implemented in a [wrap][docs_wrap] convenience function which takes a function and its arguments, and executes it in a block like the above. For example:
+Postgres handles errors with `longjmp`, which can skip Zig `defer`/`errdefer` cleanup. pgzx provides a Zig alternative to `PG_TRY`:
 
 ```zig
-    try pgzx.err.wrap(myFunction, .{arg1, arg2});
+var errctx = pgzx.err.Context.init();
+defer errctx.deinit();
+if (errctx.pg_try()) {
+    // Zig code that calls Postgres C functions.
+} else {
+    return errctx.errorValue();
+}
 ```
+
+This catches errors raised by Postgres functions and returns them as Zig errors, so all `defer`/`errdefer` in the callers run. The [wrap][docs_wrap] helper packages this pattern:
+
+```zig
+try pgzx.err.wrap(myFunction, .{arg1, arg2});
+```
+
+See [pgzx.err.Context][docs_Context] for details.
 
 ### Memory context allocators
 
-Postgres uses a [memory context system](https://github.com/postgres/postgres/blob/master/src/backend/utils/mmgr/README) to manage memory. Memory allocated in a context can be freed all at once (for example, when a query execution is finished), which simplifies memory management significantly, because you only need to track contexts, not individual allocations. Contexts are also hierarchical, so you can create a context that is a child of another context, and when the parent context is freed, all children are freed as well.
+Postgres uses a [memory context system](https://github.com/postgres/postgres/blob/master/src/backend/utils/mmgr/README): allocations belong to a context, and freeing a context frees everything in it at once. Contexts are hierarchical, so a child context is freed with its parent.
 
-pgzx offers custom wrapper Zig allocators that use Postgres' memory context system. The [pgzx.mem.createAllocSetContext][docs_createAllocSetContext] function creates an [pgzx.mem.MemoryContextAllocator][docs_MemoryContextAllocator] that you can use as a Zig allocator. For example:
+pgzx wraps contexts as Zig allocators. [createAllocSetContext][docs_createAllocSetContext] returns a [MemoryContextAllocator][docs_MemoryContextAllocator]:
 
 ```zig
-    var memctx = try pgzx.mem.createAllocSetContext("zig_context", .{ .parent = pg.CurrentMemoryContext });
-    const allocator = memctx.allocator();
+var memctx = try pgzx.mem.createAllocSetContext("zig_context", .{ .parent = pg.CurrentMemoryContext });
+const allocator = memctx.allocator();
 ```
 
-In the above, note the use of `pg.CurrentMemoryContext` as the parent context. This is the context of the current query execution, and it will be freed when the query is finished. This means that the memory allocated with `allocator` will be freed at the same time.
-
-It's also possible to register a callback for when the memory context is destroyed or reset. This is useful to free or close resources that are tied to the context (e.g. sockets). pgzx provides an utility to register a callback:
+`pg.CurrentMemoryContext` is the context of the running query, so memory allocated with `allocator` is freed when the query finishes. You can also register a callback for when a context is reset or deleted, to release resources tied to it:
 
 ```zig
-    try memctx.registerAllocResetCallback(
-        queryDesc.*.estate.*.es_query_cxt,
-        pgaudit_zig_MemoryContextCallback,
-    );
+try memctx.registerAllocResetCallback(
+    queryDesc.*.estate.*.es_query_cxt,
+    pgaudit_zig_MemoryContextCallback,
+);
 ```
 
 ### Function manager
 
-pgzx has utilities for registering functions, written in Zig, that are then available to call over SQL. This is done, for example, via the [PG_FUNCTION_V1][docs_PG_FUNCTION_V1] function:
+Register Zig functions so they can be called from SQL with [PG_FUNCTION_V1][docs_PG_FUNCTION_V1]:
 
-```
+```zig
 comptime {
     pgzx.PG_FUNCTION_V1("my_function", myFunction);
 }
 ```
 
-The parameters are received from Postgres serialized, but pgzx automatically deserializes them into Zig types.
+Parameters are received from Postgres serialized, and pgzx deserializes them into Zig types automatically.
 
 ### SQL schema generation
 
-Instead of hand-writing the versioned extension script (`<name>--<version>.sql`),
-you can describe your SQL objects in a comptime declaration and let `zig build`
-render the script for you. The declaration lives in `src/schema.zig` by
-convention and is conventionally named `pgzx_sql`:
+Instead of hand-writing the versioned extension script (`<name>--<version>.sql`), you can describe your SQL objects in a comptime declaration and let `zig build` render it. By convention the declaration lives in `src/schema.zig` and is named `pgzx_sql`:
 
 ```zig
 const functions = @import("functions.zig");
@@ -171,13 +146,7 @@ _ = proj.addSteps(.{
 });
 ```
 
-`zig build` (or `zig build sql`) now compiles a small generator, renders the
-SQL, and installs it next to the `.control` file, so `CREATE EXTENSION` picks
-it up. Argument types are derived from the Zig function signatures through the
-`pgzx.datum` type converters: for example `i32` becomes `integer`, `[]const u8`
-becomes `text`, and an optional argument makes no difference to the SQL type. A
-`pg.FunctionCallInfo` parameter is treated as the fmgr context and is not
-emitted as an SQL argument.
+`zig build` (or `zig build sql`) compiles a small generator, renders the SQL, and installs it next to the `.control` file so `CREATE EXTENSION` picks it up. Argument types are derived from the Zig signatures through the `pgzx.datum` converters: `i32` becomes `integer`, `[]const u8` becomes `text`, and optional arguments do not change the SQL type. A `pg.FunctionCallInfo` parameter is treated as the fmgr context and is not emitted as an SQL argument.
 
 Per-function options:
 
@@ -192,18 +161,11 @@ Per-function options:
 | `returns`    | Override the return SQL type.                                            |
 | `comment`    | Emit a `COMMENT ON FUNCTION`.                                            |
 
-Use `args`/`returns` for signatures that have no direct SQL mapping, such as
-raw `pg.Datum` arguments. The schema module must not call
-`PG_FUNCTION_V1`/`PG_EXPORT` directly (keep those in `main.zig`): the generator
-is linked as a standalone executable and cannot resolve Postgres server
-symbols. See `examples/sqlfns` and `examples/char_count_zig` for the complete
-pattern.
+Use `args`/`returns` for signatures with no direct SQL mapping, such as raw `pg.Datum` arguments. Keep `PG_FUNCTION_V1`/`PG_EXPORT` in `main.zig`, not in the schema module: the generator is linked as a standalone executable and cannot resolve Postgres server symbols. Objects that are not `CREATE FUNCTION` (types, operators, operator classes, casts) go in a source-level `catalog.sql`, which the generator appends after the functions. See `examples/rational` and `examples/sqlfns` for the complete pattern.
 
 ### Testing your extension
 
-pgzx provides two types of automatic tests: pg_regress tests and unit tests, both
-set up through the `PGBuild.Project` build helper. The standard `build.zig` is
-just:
+pgzx provides `pg_regress` tests and in-server unit tests, set up through the `PGBuild.Project` build helper:
 
 ```zig
 const std = @import("std");
@@ -231,28 +193,15 @@ pub fn build(b: *std.Build) void {
 }
 ```
 
-`addSteps` creates the `check`, `install`, `pg_regress` (when `.pg_regress` is
-set) and `unit` (when `.unit` is set) build steps. It also defines the
-`build_options` module that gates `testfn`, so you do not need to set it up
-manually.
+`addSteps` creates the `check`, `install`, `pg_regress` (when `.pg_regress` is set) and `unit` (when `.unit` is set) build steps, and defines the `build_options` module that gates `testfn`.
 
-The [pg_regress tests](https://www.postgresql.org/docs/current/regress.html) work
-the same way they do for C extensions: you provide inputs in a `sql` folder and
-expected outputs in the `expected` folder, and run them with:
+[pg_regress tests](https://www.postgresql.org/docs/current/regress.html) work like they do for C extensions: inputs go in `sql/`, expected outputs in `expected/`, and run with:
 
 ```sh
 zig build pg_regress
 ```
 
-Under the hood, this calls the `pg_regress` tool from the Postgres build.
-
-For unit tests, the tests run inside a Postgres instance, so that they compile in
-the same environment as the tested code and can call Postgres APIs. To do this,
-pgzx registers a `run_tests` function via the Function manager that runs every
-registered test suite and can be called from SQL (`SELECT run_tests();`).
-
-A test suite is a Zig struct for which each function whose name starts with
-`test` is a unit test. To register a test suite, you would typically do:
+Unit tests run inside Postgres, so they compile in the same environment as the tested code and can call Postgres APIs. Each function whose name starts with `test` in a registered test suite is a unit test:
 
 ```zig
 comptime {
@@ -260,39 +209,17 @@ comptime {
 }
 ```
 
-The `build_options.testfn` option is provided automatically by `Project.init`.
-For a complete example, check out the `char_count_zig` or `pgaudit_zig` sample
-extensions.
-
-Note that you can only call the `pgzx.testing.registerTests` function once per
-extension. If your extension has multiple modules/files, you should call it like
-this:
-
-```zig
-comptime {
-    pgzx.testing.registerTests(@import("build_options").testfn, .{
-         @import("module1.zig").Tests,
-         @import("module2.zig").Tests,
-         @import("module3.zig").Tests,
-    });
-}
-```
-
-To run the unit tests, provided that you are using our sample `build.zig`, you
-can run:
+`registerTests` may only be called once per extension; pass multiple suites in the array. Run the tests with:
 
 ```sh
 zig build unit -p $PG_HOME
 ```
 
-Behind the scenes, this builds a dedicated `{name}_unit` library with the
-`testfn` build option set to `true`, deploys it in the Postgres instance, and
-then calls `SELECT run_tests();` to run the tests. The separate library name
-means the test build never collides with the production extension library.
+This builds a dedicated `{name}_unit` library with `testfn = true`, deploys it, and calls `SELECT run_tests();`. The separate library name means the test build never collides with the production extension.
 
 ## Status/Roadmap
 
-pgzx is currently under heavy development by the [Xata](https://xata.io) team. If you want to try Zig for writing PostgreSQL extensions, it is easier with pgzx than without, but expect breaking changes and potential instability. If you need help, join us on the [Xata discord](https://xata.io/discord).
+pgzx is under heavy development by the [Xata](https://xata.io) team. Expect breaking changes and potential instability. If you need help, join us on the [Xata discord](https://xata.io/discord).
 
 * Utilities
   * [x] Postgres versions (compile and test)
@@ -313,14 +240,14 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
   * [x] Shared memory
   * [x] SPI
   * [x] GUCs (custom variables)
-  * Postgres data structures wrappers:
+  * Postgres data structure wrappers:
     * Array based list (List)
-        * [x] Pointer list
-        * [ ] int list
-        * [ ] oid list
-        * ...
-    * [ ] Single list
-    * [ ] Double list
+      * [x] Pointer list
+      * [ ] int list
+      * [ ] oid list
+      * ...
+    * [x] Single list
+    * [x] Double list
     * [x] Hash tables
 * Development environment
   * [ ] Download and vendor Postgres source code
@@ -331,351 +258,16 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
 * Packaging
   * [x] Add support for Zig packaging
 
-
-
 ## Contributing
 
-For a complete local development guide — creating a local PostgreSQL install,
-building, testing, debugging, and editor setup — see [HACKING.md](HACKING.md).
-
-### Develpment shell and local installation
-
-We use Nix to provide a local development shell.
-This ensures that we have a stable environment with all dependencies available
-in the expected versions. This is especially important with Zig, which is still
-in active development.
-
-For this purpose it is possible to use this project as input in downstream
-flake files as well.
-
-The tools we use also require some environment variables set, which are already
-pre-configured in the develpment shell.
-
-We would recommend the [nix-installer from DeterminateSystems](https://github.com/DeterminateSystems/nix-installer). The
-installer enables Nix Flakes (used by this project) out of the box and also
-provides an uninstaller.
-
-If you want to try out the project without having to install Nix on your
-system, you can do so using Docker. You can build the docker image by running
-the `dev/docker/build.sh` script. The docker image is named `pgzx:latest`.
-
-To enter the develpment shell run:
+For a complete local development guide — creating a local PostgreSQL install, building, testing, debugging, editor setup, and switching Postgres versions — see [HACKING.md](HACKING.md).
 
 ```
-$ nix develop
+$ nix develop          # enter the development shell
+$ ./dev/docker/run.sh  # or use the docker development shell
 ```
 
-If you want to use docker instead, run:
-
-```
-$ ./dev/docker/run.sh
-```
-
-This drops you into an interactive development shell. To run a single command
-instead, pass it to the container. `runuser` needs POSIX option parsing so that
-it does not swallow the `-c` flag:
-
-```
-$ docker run --rm -e POSIXLY_CORRECT=1 \
-    -v "$PWD:/home/dev/workdir" -w /home/dev/workdir pgzx:latest \
-    nix develop -c bash -c 'pguse 17 && pglocal && pginit && pgstart && zig build unit -p "$PG_HOME"; pgstop'
-```
-
-NOTE:
-We also provide a `.envrc` file to automatically enter the development shell when entering
-the projects folder. If you use direnv you can enable the environment via `direnv allow`.
-
-The nix configuration already installs PostgreSQL, but for testing we want to
-have a local postgres installation where we can install our test extensions in.
-
-The development shell provides PostgreSQL 15, 16, 17 and 18. Only one version can be
-active at a time, so a single `pg_config` on `PATH` dispatches to the selected
-version. Select a version with `pguse` before relocating it:
-
-```
-$ pguse 17
-$ pglocal
-...
-
-$ ls out
-15  16  17  default
-```
-
-We use `pglocal` to relocate the selected installation into our development
-environment. The `out/default` folder is a symlink to the postgres installation
-currently in use; `pguse <version>` repoints it and records the choice in
-`out/.pgversion`. You only need to run `pglocal` once per version, and each
-version keeps its own cluster under `out/<version>/var/`, so run `pginit` once
-per version as well.
-
-Having a local installation we want to create a local database and user:
-
-```
-$ pginit
-...
-```
-
-This creates a local database named `postgres`. The script allows us to configure an alternative name for the cluster, database, or user. This allows us to create multiple clusters within our current installation.
-
-We can start and stop the database using `pgstart` and `pgstop`. Let's test our current setup:
-
-```
-$ pgstart
-$ psql  -U postgres -c 'select version()'
-                                         version
------------------------------------------------------------------------------------------
- PostgreSQL 16.1 on aarch64-apple-darwin22.6.0, compiled by clang version 16.0.6, 64-bit
-(1 row)
-```
-
-This project has a few example extensions. We will install and test the `char_count_zig` extension next:
-
-```sh
-$ cd examples/char_count_zig
-$ zig build -freference-trace -p $PG_HOME
-$ psql  -U postgres -c 'CREATE EXTENSION char_count_zig;'
-CREATE EXTENSION
-$ psql  -U postgres -c "SELECT char_count_zig('aaabc', 'a');"
-INFO:  input_text: aaabc
-
-INFO:  target_char: a
-
-INFO:  Target char len: 1
-
- char_count_zig
-----------------
-              3
-(1 row)
-```
-
-The sample extension also supports pg_regress bases testing:
-
-```
-$ zig build pg_regress --verbose
-# using postmaster on Unix socket, port 5432
-ok 1         - char_count_test                            10 ms
-1..1
-# All 1 tests passed.
-```
-
-### Debugging the unit tests
-
-Because Postgres manages the actual processes and starts a new process for each client we must attach our debugger to an existing session.
-
-To debug an extension that exposes a function, like the unit tests, first start a SQL session:
-
-```
-$ psql -U postgres
-```
-
-In order to attach our debugger to the session we need the PID for your current process:
-
-```
-postgres=# select pg_backend_pid();
- pg_backend_pid
-----------------
-          14985
-(1 row)
-```
-
-If we want to set breakpoints we must also ensure that our extensions library has been loaded. You might have to drop and re-create an the test function in case you can't set a breakpoint (this will force Postgres to load the library):
-
-```
-postgres=# DROP FUNCTION run_tests;
-CREATE FUNCTION run_tests() RETURNS INTEGER AS '$libdir/pgzx_unit' LANGUAGE C IMMUTABLE;
-```
-
-Now we can attach our debugger and set a breakpoint (See your debuggers documentation on how to attach):
-
-```
-$ lldb -p 14985
-(lldb) b hsearch.zig:117
-...
-(lldb) c
-```
-
-You can set breakpoints in your Zig based extension in C sources given you have all debug symbols available.
-
-With our breakpoints set we want to start the testsuite:
-
-```
-postgres=# SELECT run_tests();
-```
-
-### Debugging extensions in VS Code
-
-For an editor based debugging setup we use the [CodeLLDB][vscode_codelldb] extension and attach the debugger to the backend process running our extension. Because Postgres forks a new backend process for every client connection and loads the extension library lazily, there is no process to launch: we attach to the backend that is executing our code.
-
-Start VS Code from the development shell so the editor and its language server inherit `pg_config`, `PG_HOME` and friends:
-
-```
-$ nix develop '.#debug' --command code .
-```
-
-Note: if a VS Code instance is already running, the `code` launcher hands the request to the existing instance, which keeps the environment it was started with. Quit VS Code first (for example `pkill -f /usr/lib/code`) and start it from the shell.
-
-The checked in `.vscode/launch.json` provides an `Attach to Postgres backend` configuration that prompts for the backend PID. There is also an `Attach to Postgres backend (unit tests)` configuration that builds and installs the `{name}_unit` library (`zig build -p "$PG_HOME" unit`) before attaching, so unit test debugging is a single step. The workflow is:
-
-1. Build and install the extension into the local installation:
-   ```
-   $ cd examples/char_count_zig
-   $ zig build -p "$PG_HOME"
-   ```
-2. Open a psql session and keep it open. Query the backend PID:
-   ```
-   $ psql -U postgres
-   postgres=# SELECT pg_backend_pid();
-   ```
-3. Attach the debugger to that PID (Run view -> `Attach to Postgres backend`).
-4. Force the extension library to load, set breakpoints in the Zig sources and trigger them:
-   ```
-   postgres=# LOAD 'char_count_zig';
-   postgres=# SELECT char_count_zig('aaabc', 'a');
-   ```
-
-Pending breakpoints usually resolve once the shared library is mapped. If they do not, load the library first and set them afterwards. Every connection has a new PID, so re-attach for each session. The `.vscode/tasks.json` file also provides `ext: build`, `ext: build unit lib` and `ext: pg_regress` tasks with a picker for the example to work on.
-
-### Editor setup (ZLS)
-
-If your editor reports `(unknown)` for `@import("pgzx")` the language server was unable to evaluate `build.zig`. The pgzx build runs `pg_config` and translates the Postgres headers at configure time, so ZLS has to run with the development shell environment. A symptom of a missing environment are translate-c errors such as `'postgres.h' not found` in the ZLS output panel. To fix this:
-
-- Start the editor from `nix develop` (see above), or rely on direnv. The repository ships a `.envrc` using `use flake`.
-- Let the editor find `zls` on `PATH` by launching it from `nix develop`; the checked in `.vscode/settings.json` only enables the extension and does not pin a Nix store path, which would become stale when `flake.lock` is updated. If you prefer to pin a specific binary, set `zig.zls.path` in your user settings (`settings.json` under `Ctrl+Shift+P` -> `Preferences: Open User Settings (JSON)`) using the output of `which zls` inside the shell.
-- `zls.json` enables build-on-save so the project is re-indexed with `zig build check`.
-- After changing the environment restart the extension host (Command Palette -> `Developer: Restart Extension Host`).
-- When switching Postgres versions with `pguse`, delete the example's `.zig-cache` so that ZLS rebuilds against the new headers.
-
-[vscode_codelldb]: https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb
-
-### Postgres debug build
-
-The default development shell and scripts relocated the Nix postgres installation into the `out` folder only. When debugging an extension in isolation this is normally all you need. But in case you need to debug and step into the Postgres sources as well it is helpful to have a debug build available.
-
-This project provides a second development shell type that provides tooling to fetch and build Postgres in debug mode.
-
-Select the `debug` shell to start a shell with required development tools:
-
-```
-nix develop '.#debug'
-```
-
-The `pgbuild` script will fetch the Postgres sources and build a local debug build that you can use for development, testing, and debugging:
-
-```
-$ pgbuild
-```
-
-This will checkout Postgres into the `out/postgresql_src` directory. The build files will be stored in `out/postgresql_src/build`. We use [meson](https://mesonbuild.com/) and [Ninja](https://ninja-build.org/) to build Postgres. Ninja speeds up the compilation by parallelizing compilation tasks as much as possible. Compilation via Ninja also emits a `compile_commands.json` file that you can use with your editors LSP to improve navigating the Postgres source code if you wish to do so.
-
-Optionally symlink the `compile_commands.json` file:
-
-```
-$ ln -s ./out/postgresql_src/build/compile_commands.json ./out/postgresql_src/compile_commands.json
-```
-
-The local build will be installed in `out/local`. To switch to the local Postgres build and ensure that your extension builds against it use:
-
-```
-$ pguse local
-
-```
-
-Note: Delete the `zig-cache` folder when switching to another Postgres installation to ensure that you extension is rebuilt properly against the new version.
-
-
-### Debugging Zig standard library and build script support
-
-To debug Zig build scripts or the standard library all you need is the original sources. No additional build step is required. Anyways, it is recommended to use the same library version as the zig compiler ships with. You can query the current version using the `zig` tool:
-
-```
-$ zig version
-0.16.0
-```
-
-The development shell uses the tagged release `0.16.0`. You can clone and checkout the matching sources by yourself. We also have a small script `ziglocal` to checkout and even build the compiler. You can use the script to just checkout the correct version into your development environment:
-
-```
-$ ziglocal clone --branch 0.16.0
-```
-
-This command clones only that tag into the `./out/zig` directory.
-
-Now when building the test extensions you can use the `--zig-lib-dir` CLI flag to tell the compiler to use an alternative library:
-
-```
-$ zig build unit -p $PG_HOME --zig-lib-dir $PRJ_ROOT/out/zig/lib
-```
-
-The zig compiler will now use the local checkout to build the `build.zig` file and your project.
-
-
-### Debugging Zig compiler/linker
-
-As Zig is still in development, you might have the need to build the Zig toolchain yourself, maybe in debug mode.
-
-The `debug` shell installs the additional dependencies that you need to build Postgres or the Zig compiler yourself.
-
-```
-nix develop '.#debug'
-```
-
-Optionally we might want to debug the actual version that we normally use:
-
-```
-$ zig version
-0.16.0
-```
-
-Next we checkout and compile the toolchain (Note: the `--branch` option is optional):
-
-```
-$ ziglocal --branch 0.16.0
-```
-
-This step will take a while. You will find the compiler and library of your local debug build in the `out/zig/build/stage3` directory.
-
-## Q&A
-
-### Which Zig version do you support?
-
-The Zig toolchain, including the compiler, build system, and standard library, is still in development and breaking changes do happen every now and then. This project targets **Zig 0.16**.
-
-The Nix based development shell takes Zig from `nixpkgs` (exposed as `pkgs.zigpkgs.stable` through an overlay), so the `flake.lock` file pins the exact nixpkgs revision, and with it the compiler version. We track `nixpkgs-unstable`, which is also what provides PostgreSQL 15, 16, 17 and 18.
-
-The dependency is updated by us every so often and we try to test and fix breaking changes when updating the toolchain version. We highly recommend to use the projects develoment shell when testing the example extensions provided, otherwise you might have problems compiling the extensions at all.
-
-We understand not everyone is keen to install Nix locally. For getting to know the environment you can build and run a development shell in a local docker container. Use `./dev/docker/build.sh` to build the container and `./dev/docker/run.sh` to start the dockerized development shell.
-
-
-### Where is my extension installed?
-
-By default the zig build system installs all artifacts into the local `zig-out` folder.
-
-For example we can see that behavior when building the `char_count_zig` extension:
-
-```
-$ cd examples/char_count_zig
-$ zig build
-$ find zig-out
-zig-out
-zig-out/lib
-zig-out/lib/char_count_zig.dylib
-zig-out/share
-zig-out/share/postgresql
-zig-out/share/postgresql/extension
-zig-out/share/postgresql/extension/char_count_zig.control
-zig-out/share/postgresql/extension/char_count_zig--0.1.sql
-```
-
-If you are not sure whether the build system puts all files into the correct location or in case you generate code it can be helpful to debug your build scripts to install into `zig-out`.
-
-To install the extension with your local Postgres instance you need to pass the path prefix where postgres was installed to using the `-p` flag:
-
-```
-$ zig build -p <path/to/postgres>
-```
-
-You can run `dirname $(pg_config --bindir)` from your shell to find the installation prefix. We set `PG_HOME` to the expected path in the development shell, assuming you use the `pglocal` or `pgbuild` scripts to prepare a local postgres installation for development.
+The examples build and test through each example's `ci/run.sh`; `./ci/run.sh` at the repo root runs all of them.
 
 ## See also
 
