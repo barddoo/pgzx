@@ -484,7 +484,7 @@ Pending breakpoints usually resolve once the shared library is mapped. If they d
 If your editor reports `(unknown)` for `@import("pgzx")` the language server was unable to evaluate `build.zig`. The pgzx build runs `pg_config` and translates the Postgres headers at configure time, so ZLS has to run with the development shell environment. A symptom of a missing environment are translate-c errors such as `'postgres.h' not found` in the ZLS output panel. To fix this:
 
 - Start the editor from `nix develop` (see above), or rely on direnv. The repository ships a `.envrc` using `use flake`.
-- Pin the ZLS binary to the version shipped by the shell: `.vscode/settings.json` sets `zig.zls.path`. Update it with the output of `which zls` inside the shell, because Nix store paths change when `flake.lock` is updated.
+- Let the editor find `zls` on `PATH` by launching it from `nix develop`; the checked in `.vscode/settings.json` only enables the extension and does not pin a Nix store path, which would become stale when `flake.lock` is updated. If you prefer to pin a specific binary, set `zig.zls.path` in your user settings (`settings.json` under `Ctrl+Shift+P` -> `Preferences: Open User Settings (JSON)`) using the output of `which zls` inside the shell.
 - `zls.json` enables build-on-save so the project is re-indexed with `zig build check`.
 - After changing the environment restart the extension host (Command Palette -> `Developer: Restart Extension Host`).
 - When switching Postgres versions with `pguse`, delete the example's `.zig-cache` so that ZLS rebuilds against the new headers.

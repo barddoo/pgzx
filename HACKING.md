@@ -396,8 +396,11 @@ in the ZLS output panel.
 
 - Start the editor from `nix develop`, or rely on direnv (`.envrc` uses
   `use flake`).
-- `.vscode/settings.json` pins `zig.zls.path` to the shell's `zls`. Refresh it
-  with `which zls` after `flake.lock` updates.
+- Launch the editor from `nix develop` so `zls` is found on `PATH`; the
+  checked in `.vscode/settings.json` enables the extension but deliberately
+  does not pin a Nix store path. Pin `zig.zls.path` in your user settings
+  instead (`which zls` inside the shell) if you need a specific binary, since
+  store paths change when `flake.lock` updates.
 - `zls.json` enables build-on-save so the project is re-indexed with
   `zig build check`.
 - Restart the extension host after changing the environment.

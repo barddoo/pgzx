@@ -1,4 +1,3 @@
 {
-  "zig.zls.enabled": "on",
-  "zig.zls.path": "/nix/store/ardwr129h20zssx7sp2dh3qmsfzbz08l-zls-0.16.0/bin/zls"
+  "zig.zls.enabled": "on"
 }
