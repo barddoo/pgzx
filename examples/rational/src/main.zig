@@ -2,7 +2,7 @@
 //!
 //! The implementations live in functions.zig and the SQL schema in
 //! schema.zig; keeping them out of this file lets the schema generator link
-//! without the Postgres server. See BUILD.md.
+//! without the Postgres server. See docs/BUILD.md.
 
 const pgzx = @import("pgzx");
 const functions = @import("functions.zig");

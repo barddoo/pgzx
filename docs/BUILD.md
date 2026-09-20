@@ -8,7 +8,7 @@ points of view:
 2. **pgzx internals** — how `src/pgzx/build.zig` implements those steps, how the
    SQL generator is wired up, and how the pieces fit together.
 
-It complements [HACKING.md](HACKING.md), which covers the development shell and
+It complements [HACKING.md](../HACKING.md), which covers the development shell and
 a local PostgreSQL install. Where this document talks about `$PG_HOME`, that is
 the relocated PostgreSQL installation from HACKING.md.
 

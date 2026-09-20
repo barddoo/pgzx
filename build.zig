@@ -157,8 +157,12 @@ pub fn build(b: *std.Build) void {
         });
         steps.docs.dependOn(&install_docs.step);
 
+        // Remove only the generated doc artifacts, so hand-written files in
+        // ./docs (for example BUILD.md) survive `zig build docs`.
         const del_docs = b.addSystemCommand(&[_][]const u8{
-            "rm", "-fr", "./docs",
+            "rm",                "-fr",
+            "./docs/index.html", "./docs/main.js",
+            "./docs/main.wasm",  "./docs/sources.tar",
         });
         const copy_docs = b.addSystemCommand(&[_][]const u8{
             "cp", "-fr", "./zig-out/share/pgzx/docs", ".",
