@@ -71,6 +71,8 @@ pub export fn _PG_init() void {
     // Setup logging. We want to see all messages in the client session ;)
     pgzx.elog.options.postgresLogFnLeven = pg.LOG;
 
+    settings.register();
+
     prev_ExecutorStart_hook = pg.ExecutorStart_hook;
     pg.ExecutorStart_hook = pgaudit_zig_ExecutorStart_hook;
 
@@ -91,8 +93,6 @@ fn getAuditList() error{PGErrorStack}!*std.ArrayList(*AuditEvent) {
     if (audit_events_list) |*list| {
         return list;
     }
-
-    settings.register();
 
     // Create a memory context for the global list. The parent is TopMemoryContext, so it will never be destroyed.
     global_memctx = pgzx.mem.createAllocSetContext("pgaudit_zig_context_global", .{ .parent = pg.TopMemoryContext }) catch |err| {
@@ -298,14 +298,13 @@ fn eventToJSON(event: *AuditEvent, writer: *std.Io.Writer) !void {
 fn logAuditEvent(event: *AuditEvent) !void {
     std.log.debug("pgaudit_zig: logAuditEvent\n", .{});
 
-    var string = std.ArrayList(u8).empty;
-    defer string.deinit(pgzx.mem.PGCurrentContextAllocator);
-    var str_writer: std.Io.Writer.Allocating = .fromArrayList(pgzx.mem.PGCurrentContextAllocator, &string);
+    var str_writer: std.Io.Writer.Allocating = .init(pgzx.mem.PGCurrentContextAllocator);
+    defer str_writer.deinit();
 
     try eventToJSON(event, &str_writer.writer);
     try str_writer.writer.flush();
 
-    std.log.debug("pgaudit_zig: logAuditEvent: {s}\n", .{string.items});
+    std.log.debug("pgaudit_zig: logAuditEvent: {s}\n", .{str_writer.written()});
 }
 
 const Tests = struct {
@@ -350,9 +349,8 @@ const Tests = struct {
             .memctx = memctx,
         };
 
-        var string = std.ArrayList(u8).empty;
-        defer string.deinit(allocator);
-        var str_writer: std.Io.Writer.Allocating = .fromArrayList(allocator, &string);
+        var str_writer: std.Io.Writer.Allocating = .init(allocator);
+        defer str_writer.deinit();
 
         try eventToJSON(&event, &str_writer.writer);
         try str_writer.writer.flush();
@@ -360,7 +358,7 @@ const Tests = struct {
         const expected =
             \\{"operation": "CMD_SELECT", "commandText": "select test()"}
         ;
-        try std.testing.expectEqualSlices(u8, expected, string.items);
+        try std.testing.expectEqualSlices(u8, expected, str_writer.written());
     }
 };
 

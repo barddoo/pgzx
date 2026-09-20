@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ext: build",
+      "type": "shell",
+      "command": "zig build -freference-trace -p \"$PG_HOME\"",
+      "options": {
+        "cwd": "${workspaceFolder}/examples/${input:example}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "ext: build unit lib",
+      "type": "shell",
+      "command": "zig build -p \"$PG_HOME\" unit",
+      "options": {
+        "cwd": "${workspaceFolder}/examples/${input:example}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "ext: pg_regress",
+      "type": "shell",
+      "command": "zig build -p \"$PG_HOME\" pg_regress --verbose",
+      "options": {
+        "cwd": "${workspaceFolder}/examples/${input:example}"
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "example",
+      "type": "pickString",
+      "description": "Which example to build/test",
+      "options": [
+        "char_count_zig",
+        "guc",
+        "pghostname_zig",
+        "spi_sql",
+        "sqlfns",
+        "bgworker",
+        "pgaudit_zig"
+      ],
+      "default": "char_count_zig"
+    }
+  ]
+}

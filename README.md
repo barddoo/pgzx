@@ -279,6 +279,9 @@ pgzx is currently under heavy development by the [Xata](https://xata.io) team. I
 
 ## Contributing
 
+For a complete local development guide — creating a local PostgreSQL install,
+building, testing, debugging, and editor setup — see [HACKING.md](HACKING.md).
+
 ### Develpment shell and local installation
 
 We use Nix to provide a local development shell.
@@ -443,6 +446,50 @@ With our breakpoints set we want to start the testsuite:
 postgres=# SELECT run_tests();
 ```
 
+### Debugging extensions in VS Code
+
+For an editor based debugging setup we use the [CodeLLDB][vscode_codelldb] extension and attach the debugger to the backend process running our extension. Because Postgres forks a new backend process for every client connection and loads the extension library lazily, there is no process to launch: we attach to the backend that is executing our code.
+
+Start VS Code from the development shell so the editor and its language server inherit `pg_config`, `PG_HOME` and friends:
+
+```
+$ nix develop '.#debug' --command code .
+```
+
+Note: if a VS Code instance is already running, the `code` launcher hands the request to the existing instance, which keeps the environment it was started with. Quit VS Code first (for example `pkill -f /usr/lib/code`) and start it from the shell.
+
+The checked in `.vscode/launch.json` provides an `Attach to Postgres backend` configuration that prompts for the backend PID. There is also an `Attach to Postgres backend (unit tests)` configuration that builds and installs the `{name}_unit` library (`zig build -p "$PG_HOME" unit`) before attaching, so unit test debugging is a single step. The workflow is:
+
+1. Build and install the extension into the local installation:
+   ```
+   $ cd examples/char_count_zig
+   $ zig build -p "$PG_HOME"
+   ```
+2. Open a psql session and keep it open. Query the backend PID:
+   ```
+   $ psql -U postgres
+   postgres=# SELECT pg_backend_pid();
+   ```
+3. Attach the debugger to that PID (Run view -> `Attach to Postgres backend`).
+4. Force the extension library to load, set breakpoints in the Zig sources and trigger them:
+   ```
+   postgres=# LOAD 'char_count_zig';
+   postgres=# SELECT char_count_zig('aaabc', 'a');
+   ```
+
+Pending breakpoints usually resolve once the shared library is mapped. If they do not, load the library first and set them afterwards. Every connection has a new PID, so re-attach for each session. The `.vscode/tasks.json` file also provides `ext: build`, `ext: build unit lib` and `ext: pg_regress` tasks with a picker for the example to work on.
+
+### Editor setup (ZLS)
+
+If your editor reports `(unknown)` for `@import("pgzx")` the language server was unable to evaluate `build.zig`. The pgzx build runs `pg_config` and translates the Postgres headers at configure time, so ZLS has to run with the development shell environment. A symptom of a missing environment are translate-c errors such as `'postgres.h' not found` in the ZLS output panel. To fix this:
+
+- Start the editor from `nix develop` (see above), or rely on direnv. The repository ships a `.envrc` using `use flake`.
+- Pin the ZLS binary to the version shipped by the shell: `.vscode/settings.json` sets `zig.zls.path`. Update it with the output of `which zls` inside the shell, because Nix store paths change when `flake.lock` is updated.
+- `zls.json` enables build-on-save so the project is re-indexed with `zig build check`.
+- After changing the environment restart the extension host (Command Palette -> `Developer: Restart Extension Host`).
+- When switching Postgres versions with `pguse`, delete the example's `.zig-cache` so that ZLS rebuilds against the new headers.
+
+[vscode_codelldb]: https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb
 
 ### Postgres debug build
 

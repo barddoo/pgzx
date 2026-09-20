@@ -7,7 +7,8 @@ set -o pipefail
 eval "$(pgenv "$@")"
 
 echo "Starting PostgreSQL cluster $PG_CLUSTER_NAME"
-pg_ctl -D "$PG_CLUSTER_DATA_DIR" -l "$PG_CLUSTER_LOG_FILE" start || {
+mkdir -p "$PG_SOCKET_DIR"
+pg_ctl -D "$PG_CLUSTER_DATA_DIR" -l "$PG_CLUSTER_LOG_FILE" -o "-k $PG_SOCKET_DIR" start || {
 	echo "Failed to start PostgreSQL"
 	cat "$PG_CLUSTER_LOG_FILE"
 	exit 1

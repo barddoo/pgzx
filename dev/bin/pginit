@@ -85,17 +85,20 @@ cluster_dir=$PG_HOME/var/$cluster_name
 data_dir=$cluster_dir/data
 log_dir=$cluster_dir/log
 log_file=$log_dir/server.log
+socket_dir=${PG_SOCKET_DIR:-$PG_HOME/run}
 
 # create the database
 mkdir -p "$cluster_dir"
 mkdir -p "$data_dir"
 mkdir -p "$log_dir"
+mkdir -p "$socket_dir"
+export PGHOST=$socket_dir
 # Call initdb directly: `pg_ctl initdb` no longer accepts -D on PG17+.
 "$PG_BIN"/initdb -D "$data_dir" --encoding=UTF8
 
 # create database user
 date
-"$PG_BIN"/pg_ctl -t 60 -D "$data_dir" -l "$log_file" start || {
+"$PG_BIN"/pg_ctl -t 60 -D "$data_dir" -l "$log_file" -o "-k $socket_dir" start || {
 	echo "Failed to start PostgreSQL"
 	date
 	cat "$log_file"
@@ -118,6 +121,9 @@ fi
 if [ -n "$postgres_conf" ]; then
 	cp "$postgres_conf"/* "$data_dir"
 fi
+# keep unix sockets inside the local installation instead of the compiled-in
+# /run/postgresql, which is not writable on most developer machines.
+echo "unix_socket_directories='$socket_dir'" >>"$data_dir/postgresql.conf"
 if [ -n "$port" ]; then
 	echo "port=$port" >>"$data_dir/postgresql.conf"
 fi

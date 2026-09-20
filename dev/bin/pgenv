@@ -16,7 +16,15 @@ PG_CLUSTER_DIR=$PG_HOME/var/$PG_CLUSTER_NAME
 PG_CLUSTER_DATA_DIR=$PG_CLUSTER_DIR/data
 PG_CLUSTER_LOG_DIR=$PG_CLUSTER_DIR/log
 PG_CLUSTER_LOG_FILE=$PG_CLUSTER_LOG_DIR/server.log
+# Nix PostgreSQL is compiled with DEFAULT_PGSOCKET_DIR=/run/postgresql, which is
+# root-owned and may not exist outside a distro-managed service. Keep the unix
+# socket inside our local installation instead, and point libpq clients at it.
+PG_SOCKET_DIR=${PG_SOCKET_DIR:-$PG_HOME/run}
+export PGHOST=$PG_SOCKET_DIR
+echo "PG_CLUSTER_NAME='$PG_CLUSTER_NAME'"
 echo "PG_CLUSTER_DIR='$PG_CLUSTER_DIR'"
 echo "PG_CLUSTER_DATA_DIR='$PG_CLUSTER_DATA_DIR'"
 echo "PG_CLUSTER_LOG_DIR='$PG_CLUSTER_LOG_DIR'"
 echo "PG_CLUSTER_LOG_FILE='$PG_CLUSTER_LOG_FILE'"
+echo "PG_SOCKET_DIR='$PG_SOCKET_DIR'"
+echo "export PGHOST='$PGHOST'"

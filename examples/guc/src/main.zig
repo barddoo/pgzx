@@ -40,6 +40,9 @@ pub export fn _PG_init() void {
         .name = "guc.sample_int",
         .short_desc = "Sample integer GUC",
         .initial_value = 42,
+        // Postgres validates min/max before running the check hook, so the
+        // bounds must admit the values the hook is meant to clamp.
+        .min_value = -100,
         .check_hook = pgzx.guc.checkIntHook(clampInt),
     });
 

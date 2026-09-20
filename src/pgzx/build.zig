@@ -422,9 +422,14 @@ pub fn getExtensionDir(b: *Build) []const u8 {
 
 pub fn getPGRegressPath(b: *Build) []const u8 {
     b.paths.pg_regress_path = b.paths.pg_regress_path orelse blk: {
-        const pkglib = b.getPackageLibDir();
-        const pg_regress = "pgxs/src/test/regress/pg_regress";
-        break :blk b.std_build.pathJoin(&[_][]const u8{ pkglib, pg_regress });
+        // `pg_config --pkglibdir` may point at a different installation root
+        // than the one shipping the pgxs tooling (e.g. Nix splits the -dev
+        // output out). `pg_config --pgxs` always points at the same tree as
+        // pg_regress, i.e. <prefix>/lib/pgxs/src/makefiles/pgxs.mk, so derive
+        // the tool path from it instead.
+        const pgxs = b.runPGConfig("--pgxs");
+        const pgxs_src = std.fs.path.dirname(std.fs.path.dirname(pgxs) orelse pgxs) orelse pgxs;
+        break :blk b.std_build.pathJoin(&[_][]const u8{ pgxs_src, "test/regress/pg_regress" });
     };
     return b.paths.pg_regress_path.?;
 }

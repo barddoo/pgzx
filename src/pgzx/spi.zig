@@ -45,10 +45,12 @@ pub const ExecOptions = struct {
 pub const SPIError = err.PGError || std.mem.Allocator.Error;
 
 pub fn exec(sql: [:0]const u8, options: ExecOptions) SPIError!isize {
-    const ret = try execImpl(sql, options);
+    _ = try execImpl(sql, options);
     var rows = Rows.init();
     defer rows.deinit();
-    return @intCast(ret);
+    // SPI_execute returns a status code (SPI_OK_*), not the row count. The
+    // number of rows affected/returned is exposed via the SPI_processed global.
+    return @intCast(pg.SPI_processed);
 }
 
 pub fn query(sql: [:0]const u8, options: ExecOptions) SPIError!Rows {

@@ -127,7 +127,12 @@ pub const CustomBoolVariable = struct {
     };
 
     pub fn registerValue(options: Options) void {
-        doRegister(null, options);
+        // Back the variable with storage in TopMemoryContext so that
+        // GetConfigOption (and Postgres internals) have a value address to
+        // read, even when the caller does not keep a Zig-side variable.
+        const cell = topAlloc(bool);
+        cell.* = options.initial_value;
+        doRegister(cell, options);
     }
 
     pub fn register(self: *CustomBoolVariable, options: Options) void {
@@ -169,7 +174,9 @@ pub const CustomIntVariable = struct {
     };
 
     pub fn registerValue(options: Options) void {
-        doRegister(null, options);
+        const cell = topAlloc(c_int);
+        cell.* = options.initial_value orelse 0;
+        doRegister(cell, options);
     }
 
     pub fn register(self: *CustomIntVariable, options: Options) void {
@@ -216,7 +223,9 @@ pub const CustomRealVariable = struct {
     };
 
     pub fn registerValue(options: Options) void {
-        doRegister(null, options);
+        const cell = topAlloc(f64);
+        cell.* = options.initial_value;
+        doRegister(cell, options);
     }
 
     pub fn register(self: *CustomRealVariable, options: Options) void {
@@ -258,7 +267,9 @@ pub const CustomStringVariable = struct {
     };
 
     pub fn registerValue(options: Options) void {
-        doRegister(null, options);
+        const cell = topAlloc([*c]u8);
+        cell.* = if (options.initial_value) |v| @constCast(v.ptr) else null;
+        doRegister(@ptrCast(cell), options);
     }
 
     pub fn register(self: *CustomStringVariable, options: Options) void {
@@ -320,7 +331,9 @@ pub const CustomEnumVariable = struct {
     };
 
     pub fn registerValue(options: Options) void {
-        doRegister(null, options);
+        const cell = topAlloc(c_int);
+        cell.* = options.initial_value;
+        doRegister(cell, options);
     }
 
     pub fn register(self: *CustomEnumVariable, options: Options) void {
@@ -397,6 +410,13 @@ fn optSliceCPtr(opt_slice: ?[:0]const u8) [*c]const u8 {
     return null;
 }
 
+/// Allocates a single value in `TopMemoryContext` so it lives for the whole
+/// backend process, which is what GUC variables require.
+fn topAlloc(comptime T: type) *T {
+    var top_alloc = mem.MemoryContextAllocator.init(pg.TopMemoryContext, .{});
+    return top_alloc.allocator().create(T) catch unreachable;
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -448,6 +468,9 @@ pub const TestSuite_Guc = struct {
             .name = "pgzx.test_int_check",
             .short_desc = "pgzx unit test int check",
             .initial_value = 0,
+            // Postgres enforces min/max before the check hook runs, so allow
+            // the out-of-range input through to the hook.
+            .min_value = -100,
             .check_hook = checkIntHook(testIntClampHook),
         });
 

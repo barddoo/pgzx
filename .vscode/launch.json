@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to Postgres backend",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${input:pgBackendPid}",
+      "expressions": "simple"
+    },
+    {
+      "name": "Attach to Postgres backend (unit tests)",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${input:pgBackendPid}",
+      "expressions": "simple",
+      "preLaunchTask": "ext: build unit lib"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pgBackendPid",
+      "type": "promptString",
+      "description": "PID from SELECT pg_backend_pid() in the psql session running the extension"
+    }
+  ]
+}

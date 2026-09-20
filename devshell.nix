@@ -81,6 +81,12 @@ in {
   packages =
     scripts
     ++ [
+      # stdenv exposes the non-interactive `bash` build (no readline), which
+      # cannot interpret the `\[`/`\]` non-printing markers Starship emits in
+      # PS1 and lacks `complete`/progcomp. Put the interactive build first so
+      # shells launched from the dev shell render the prompt correctly.
+      pkgs.bashInteractive
+
       # make linters and formatters available in dev shell
       pkgs.pre-commit
       pkgs.alejandra
@@ -105,7 +111,19 @@ in {
 
   shellHook = ''
     export PRJ_ROOT=$PWD
+
+    # `nix develop` exports SHELL pointing at the non-interactive `bash` build.
+    # That build has no readline, so it prints Starship's `\[`/`\]` prompt
+    # markers literally and has no `complete`/`bind` builtins. GUI terminals
+    # (e.g. VS Code, launched via `nix develop --command code .`) pick their
+    # shell from $SHELL, so point it at the interactive build instead.
+    export SHELL=${pkgs.bashInteractive}/bin/bash
+
     export PG_HOME=$PRJ_ROOT/out/default
+    # Keep libpq clients (psql, pg_regress, ...) in sync with the server socket
+    # directory used by pgstart/pginit, instead of the compiled-in
+    # /run/postgresql which is not writable on most developer machines.
+    export PGHOST=$PG_HOME/run
     export PATH="$PG_HOME/lib/postgresql/pgxs/src/test/regress:$PATH"
     export PATH="$PG_HOME/bin:$PRJ_ROOT/dev/bin:$PATH"
 
