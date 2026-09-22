@@ -1,0 +1,14 @@
+.{
+    .name = .compress_zig,
+    .fingerprint = 0x9a5190c4c960d14c,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

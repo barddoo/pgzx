@@ -1,0 +1,7 @@
+# compress_zig extension
+comment = 'pgzx: on-disk columnar compression example'
+default_version = '0.1'
+module_pathname = '$libdir/compress_zig'
+relocatable = false
+superuser = false
+schema = 'compress_zig'
