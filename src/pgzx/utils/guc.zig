@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const pg = @import("pgzx_pgsys");
+const err = @import("../err.zig");
 const mem = @import("../mem.zig");
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,41 @@ pub inline fn checkEnumHook(comptime f: anytype) pg.GucEnumCheckHook {
             return f(@as(*c_int, @ptrCast(newval)), @as(*?*anyopaque, @ptrCast(extra)), source);
         }
     }.shim;
+}
+
+/// Adapts `f(newval: *[*c]u8, extra: *?*anyopaque, source: pg.GucSource) bool`
+/// into a `GucStringCheckHook`. A hook that replaces `newval.*` must allocate
+/// the new string with `pg.guc_strdup`/`pg.guc_malloc` and free the old one
+/// with `pg.guc_free`, as required by guc.h.
+pub inline fn checkStringHook(comptime f: anytype) pg.GucStringCheckHook {
+    return struct {
+        fn shim(newval: [*c][*c]u8, extra: [*c]?*anyopaque, source: pg.GucSource) callconv(.c) bool {
+            return f(@as(*[*c]u8, @ptrCast(newval)), @as(*?*anyopaque, @ptrCast(extra)), source);
+        }
+    }.shim;
+}
+
+/// Sets the detail message reported when a check hook returns `false`
+/// (the `GUC_check_errmsg` macro). Call it from inside a check hook.
+pub fn checkErrMsg(comptime fmt: []const u8, args: anytype) void {
+    pg.GUC_check_errmsg_string = formatCheckMsg(fmt, args);
+}
+
+/// Sets the `GUC_check_errdetail` message. Call it from inside a check hook.
+pub fn checkErrDetail(comptime fmt: []const u8, args: anytype) void {
+    pg.GUC_check_errdetail_string = formatCheckMsg(fmt, args);
+}
+
+/// Sets the `GUC_check_errhint` message. Call it from inside a check hook.
+pub fn checkErrHint(comptime fmt: []const u8, args: anytype) void {
+    pg.GUC_check_errhint_string = formatCheckMsg(fmt, args);
+}
+
+fn formatCheckMsg(comptime fmt: []const u8, args: anytype) [*c]u8 {
+    // Check hooks run in a short-lived context owned by the GUC machinery,
+    // which also reads these strings before it is reset.
+    const msg = std.fmt.allocPrintSentinel(mem.PGCurrentContextAllocator, fmt, args, 0) catch return null;
+    return msg.ptr;
 }
 
 /// Adapts `f(newval: bool, extra: ?*anyopaque) void` into a `GucBoolAssignHook`.
@@ -403,6 +439,47 @@ pub fn defineCustomInt(options: CustomIntOptions) void {
     );
 }
 
+/// Reserves a GUC prefix (`MarkGUCPrefixReserved`): warns about and removes
+/// placeholder settings like `<prefix>.typo`, and rejects new ones. Call it
+/// from `_PG_init` after defining all variables of the extension.
+pub fn markPrefixReserved(prefix: [:0]const u8) void {
+    pg.MarkGUCPrefixReserved(prefix.ptr);
+}
+
+/// Returns the current value of a setting as text, or `null` if it does not
+/// exist. The string is owned by the GUC machinery and only valid until the
+/// setting changes.
+pub fn getOption(name: [:0]const u8) ?[:0]const u8 {
+    const value = pg.GetConfigOption(name.ptr, true, false);
+    if (value == null) return null;
+    return std.mem.span(value);
+}
+
+pub const SetOptions = struct {
+    context: pg.GucContext = pg.PGC_USERSET,
+    source: pg.GucSource = pg.PGC_S_SESSION,
+    /// `true` behaves like `SET LOCAL`: the value is reverted at the end of
+    /// the current transaction.
+    local: bool = false,
+};
+
+/// Sets a setting from its text representation. Postgres errors (unknown
+/// setting, invalid value, permission denied) are returned as
+/// `error.PGErrorStack`.
+pub fn setOption(name: [:0]const u8, value: ?[:0]const u8, options: SetOptions) err.ElogIndicator!void {
+    const action: pg.GucAction = if (options.local) pg.GUC_ACTION_LOCAL else pg.GUC_ACTION_SET;
+    _ = try err.wrap(pg.set_config_option, .{
+        name.ptr,
+        if (value) |v| v.ptr else null,
+        options.context,
+        options.source,
+        action,
+        true, // changeVal
+        pg.ERROR, // elevel
+        false, // is_reload
+    });
+}
+
 fn optSliceCPtr(opt_slice: ?[:0]const u8) [*c]const u8 {
     if (opt_slice) |s| {
         return s.ptr;
@@ -433,6 +510,16 @@ fn testIntClampHook(newval: *c_int, extra: *?*anyopaque, source: pg.GucSource) b
     _ = source;
     if (newval.* < 0) {
         newval.* = 0;
+    }
+    return true;
+}
+
+fn testStringRejectEmpty(newval: *[*c]u8, extra: *?*anyopaque, source: pg.GucSource) bool {
+    _ = extra;
+    _ = source;
+    if (newval.* == null or newval.*[0] == 0) {
+        checkErrMsg("value must not be empty", .{});
+        return false;
     }
     return true;
 }
@@ -499,6 +586,27 @@ pub const TestSuite_Guc = struct {
         try std.testing.expectEqualStrings("hello", std.mem.span(pg.GetConfigOption("pgzx.test_string", false, false)));
         pg.SetConfigOption("pgzx.test_string", "world", pg.PGC_USERSET, pg.PGC_S_SESSION);
         try std.testing.expectEqualStrings("world", std.mem.span(pg.GetConfigOption("pgzx.test_string", false, false)));
+    }
+
+    pub fn testCustomStringVariableWithCheckHook() !void {
+        CustomStringVariable.registerValue(.{
+            .name = "pgzx.test_string_check",
+            .short_desc = "pgzx unit test string check",
+            .initial_value = "ok",
+            .check_hook = checkStringHook(testStringRejectEmpty),
+        });
+
+        try setOption("pgzx.test_string_check", "fine", .{});
+        try std.testing.expectEqualStrings("fine", getOption("pgzx.test_string_check").?);
+
+        const rejected = setOption("pgzx.test_string_check", "", .{});
+        try std.testing.expectError(error.PGErrorStack, rejected);
+        pg.FlushErrorState();
+        try std.testing.expectEqualStrings("fine", getOption("pgzx.test_string_check").?);
+    }
+
+    pub fn testGetOptionMissing() !void {
+        try std.testing.expectEqual(@as(?[:0]const u8, null), getOption("pgzx.does_not_exist"));
     }
 
     pub fn testCustomEnumVariable() !void {

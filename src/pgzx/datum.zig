@@ -188,9 +188,12 @@ pub fn findConv(comptime T: type) type {
         .optional => |opt| OptConv(findConv(opt.child)),
         .array => @compileLog("fixed size arrays not supported"),
         .pointer => blk: {
-            if (!meta.isStringLike(T)) {
+            if (!meta.isStringLike(T) and !meta.isSlice(T)) {
                 @compileLog("type:", T);
                 @compileError("unsupported ptr type");
+            }
+            if (meta.isSlice(T) and !meta.isStringLike(T)) {
+                break :blk ArrayConv(meta.sliceElemType(T));
             }
             break :blk if (meta.hasSentinal(T)) SliceU8Z else SliceU8;
         },
@@ -235,13 +238,13 @@ pub const Bool = SimpleConv(bool, pg.DatumGetBool, pg.BoolGetDatum, "boolean");
 pub const Int8 = SimpleConv(i8, datumGetInt8, pg.Int8GetDatum, "smallint");
 pub const Int16 = SimpleConv(i16, pg.DatumGetInt16, pg.Int16GetDatum, "smallint");
 pub const Int32 = SimpleConv(i32, pg.DatumGetInt32, pg.Int32GetDatum, "integer");
-pub const Int64 = SimpleConv(i64, pg.DatumGetInt64, pg.Int64GetDatum, "bigint");
+pub const Int64 = SimpleConv(i64, datumGetInt64, pg.Int64GetDatum, "bigint");
 pub const UInt8 = SimpleConv(u8, pg.DatumGetUInt8, pg.UInt8GetDatum, "smallint");
 pub const UInt16 = SimpleConv(u16, pg.DatumGetUInt16, pg.UInt16GetDatum, "integer");
 pub const UInt32 = SimpleConv(u32, pg.DatumGetUInt32, pg.UInt32GetDatum, "bigint");
 pub const UInt64 = SimpleConv(u64, pg.DatumGetUInt64, pg.UInt64GetDatum, "bigint");
 pub const Float32 = SimpleConv(f32, pg.DatumGetFloat4, pg.Float4GetDatum, "real");
-pub const Float64 = SimpleConv(f64, pg.DatumGetFloat8, pg.Float8GetDatum, "double precision");
+pub const Float64 = SimpleConv(f64, datumGetFloat8, pg.Float8GetDatum, "double precision");
 pub const PGDatum = SimpleConv(pg.Datum, idDatum, idDatum, null);
 
 pub const SliceU8Z = Conv(struct {
@@ -258,7 +261,206 @@ pub const SliceU8 = Conv(struct {
     pub const to = sliceToDatumStringLike;
 });
 
-// TODO: conversion decorator for array types
+/// Returns the OID of the built-in PostgreSQL type a Zig type maps to. Only
+/// types that can be array elements are supported.
+pub fn typeOid(comptime T: type) pg.Oid {
+    return switch (T) {
+        bool => pg.BOOLOID,
+        i16 => pg.INT2OID,
+        i32 => pg.INT4OID,
+        i64 => pg.INT8OID,
+        f32 => pg.FLOAT4OID,
+        f64 => pg.FLOAT8OID,
+        []const u8, [:0]const u8 => pg.TEXTOID,
+        else => @compileError("pgzx.datum: no type OID for Zig type " ++ @typeName(T)),
+    };
+}
+
+/// Converter for one-dimensional PostgreSQL arrays, mapped to `[]const Elem`.
+///
+/// `Elem` may be optional (`[]const ?i32`) to accept arrays with NULL
+/// elements; with a non-optional `Elem` a NULL element is an
+/// `UnexpectedNullValue` error. Multi-dimensional inputs are flattened in
+/// storage order. Decoded slices are allocated in the current memory context.
+pub fn ArrayConv(comptime Elem: type) type {
+    const Base = switch (@typeInfo(Elem)) {
+        .optional => |o| o.child,
+        else => Elem,
+    };
+    const elem_oid = typeOid(Base);
+    return Conv(struct {
+        pub const Type = []const Elem;
+        pub const sql_name = sqlType(Base) ++ "[]";
+
+        pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+            _ = oid;
+            return arrayFromDatum(Elem, elem_oid, d);
+        }
+
+        pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+            _ = oid;
+            return arrayToDatum(Elem, elem_oid, v);
+        }
+    });
+}
+
+/// Zero-copy view of a one-dimensional (or flattened) array of a fixed-width
+/// built-in element type: `bool`, `i16`, `i32`, `i64`, `f32` or `f64`.
+///
+/// `items` points straight at the array's element data: no
+/// `deconstruct_array`, no per-element conversion, no copy. Postgres stores
+/// these element types packed and aligned, so the data is a plain `[]const T`.
+/// The array is only copied when it has to be detoasted (compressed,
+/// out-of-line or short-header values).
+///
+/// An array containing NULLs is rejected with `UnexpectedNullValue`, like
+/// pgrx's `Array::as_slice`; use `[]const ?T` (`ArrayConv`) for those.
+///
+/// `items` is valid while the datum is, i.e. for the duration of the
+/// function call. Copy it to keep it longer.
+///
+/// `ArrayView(T)` is itself a converter, so it can be used as a function
+/// parameter (or return) type; the SQL type is `<element>[]`:
+///
+/// ```zig
+/// pub fn sum_vector(v: pgzx.datum.ArrayView(f32)) f32 {
+///     var sum: f32 = 0;
+///     for (v.items) |x| sum += x;
+///     return sum;
+/// }
+/// ```
+pub fn ArrayView(comptime T: type) type {
+    const elem_oid = typeOid(T);
+    switch (T) {
+        bool, i16, i32, i64, f32, f64 => {},
+        else => @compileError("pgzx.datum.ArrayView: " ++ @typeName(T) ++ " is not a fixed-width element type"),
+    }
+
+    return struct {
+        items: []const T,
+
+        const Self = @This();
+
+        // Converter interface (see `isConv`).
+        pub const Type = Self;
+        pub const sql_name: ?[]const u8 = sqlType(T) ++ "[]";
+
+        pub fn fromDatum(d: pg.Datum) !Self {
+            const detoasted = try err.wrap(pg.pg_detoast_datum, .{@as([*c]pg.struct_varlena, @ptrCast(@alignCast(pg.DatumGetPointer(d))))});
+            const arr: *const pg.ArrayType = @ptrCast(@alignCast(detoasted));
+            if (arr.elemtype != elem_oid) {
+                return err.PGError.UnexpectedArrayElementType;
+            }
+
+            const ndim: usize = @intCast(arr.ndim);
+            const base: [*]const u8 = @ptrCast(arr);
+            // ARR_DIMS: the dimensions follow the fixed header.
+            const dims: [*]const c_int = @ptrCast(@alignCast(base + @sizeOf(pg.ArrayType)));
+            const count: usize = if (ndim == 0) 0 else @intCast(try err.wrap(pg.ArrayGetNItems, .{ arr.ndim, dims }));
+
+            // ARR_HASNULL only says a null bitmap is present; it may still
+            // hold no NULLs.
+            if (arr.dataoffset != 0 and pg.array_contains_nulls(@constCast(arr))) {
+                return err.PGError.UnexpectedNullValue;
+            }
+
+            // ARR_DATA_OFFSET
+            const data_offset: usize = if (arr.dataoffset != 0)
+                @intCast(arr.dataoffset)
+            else
+                std.mem.alignForward(usize, @sizeOf(pg.ArrayType) + 2 * @sizeOf(c_int) * ndim, pg.MAXIMUM_ALIGNOF);
+            const data: [*]const T = @ptrCast(@alignCast(base + data_offset));
+            return .{ .items = data[0..count] };
+        }
+
+        pub fn fromNullableDatum(d: pg.NullableDatum) !Self {
+            return Self.fromNullableDatumWithOID(d, null);
+        }
+
+        pub fn fromNullableDatumWithOID(d: pg.NullableDatum, oid: ?pg.Oid) !Self {
+            _ = oid;
+            if (d.isnull) return err.PGError.UnexpectedNullValue;
+            return Self.fromDatum(d.value);
+        }
+
+        pub fn toNullableDatum(v: Self) !pg.NullableDatum {
+            return Self.toNullableDatumWithOID(v, null);
+        }
+
+        /// Builds a new array from `items` (a copy).
+        pub fn toNullableDatumWithOID(v: Self, oid: ?pg.Oid) !pg.NullableDatum {
+            _ = oid;
+            return .{ .value = try arrayToDatum(T, elem_oid, v.items), .isnull = false };
+        }
+    };
+}
+
+const ElemLayout = struct {
+    len: i16,
+    byval: bool,
+    alignment: u8,
+
+    fn of(oid: pg.Oid) ElemLayout {
+        var layout: ElemLayout = undefined;
+        pg.get_typlenbyvalalign(oid, &layout.len, &layout.byval, &layout.alignment);
+        return layout;
+    }
+};
+
+fn arrayFromDatum(comptime Elem: type, elem_oid: pg.Oid, d: pg.Datum) ![]const Elem {
+    const detoasted = try err.wrap(pg.pg_detoast_datum, .{@as([*c]pg.struct_varlena, @ptrCast(@alignCast(pg.DatumGetPointer(d))))});
+    const arr: [*c]pg.ArrayType = @ptrCast(@alignCast(detoasted));
+    if (arr.*.elemtype != elem_oid) {
+        return err.PGError.UnexpectedArrayElementType;
+    }
+
+    const layout = ElemLayout.of(elem_oid);
+    var elems: [*c]pg.Datum = null;
+    var nulls: [*c]bool = null;
+    var n: c_int = 0;
+    try err.wrap(pg.deconstruct_array, .{ arr, elem_oid, layout.len, layout.byval, layout.alignment, &elems, &nulls, &n });
+
+    const count: usize = @intCast(n);
+    const out = try mem.PGCurrentContextAllocator.alloc(Elem, count);
+    for (0..count) |i| {
+        const nd: pg.NullableDatum = .{ .value = elems[i], .isnull = nulls[i] };
+        out[i] = try findConv(Elem).fromNullableDatumWithOID(nd, elem_oid);
+    }
+    return out;
+}
+
+fn arrayToDatum(comptime Elem: type, elem_oid: pg.Oid, values: []const Elem) !pg.Datum {
+    const layout = ElemLayout.of(elem_oid);
+
+    var arena = std.heap.ArenaAllocator.init(mem.PGCurrentContextAllocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const elems = try allocator.alloc(pg.Datum, values.len);
+    const nulls = try allocator.alloc(bool, values.len);
+    for (values, 0..) |v, i| {
+        const nd = try findConv(Elem).toNullableDatumWithOID(v, elem_oid);
+        elems[i] = nd.value;
+        nulls[i] = nd.isnull;
+    }
+
+    // construct_md_array copies the element data into the new array, so the
+    // scratch buffers (and any text datums built for them) can go right after.
+    var dims = [1]c_int{@intCast(values.len)};
+    var lbs = [1]c_int{1};
+    const arr = try err.wrap(pg.construct_md_array, .{
+        elems.ptr,
+        nulls.ptr,
+        @as(c_int, if (values.len == 0) 0 else 1),
+        &dims,
+        &lbs,
+        elem_oid,
+        @as(c_int, layout.len),
+        layout.byval,
+        layout.alignment,
+    });
+    return pg.PointerGetDatum(arr);
+}
 
 // TODO: conversion decorator for jsonb decoding/encoding types
 
@@ -269,6 +471,18 @@ fn idDatum(d: pg.Datum) pg.Datum {
 fn toVoid(d: void) pg.Datum {
     _ = d;
     return 0;
+}
+
+// translate-c drops the (int64) cast in the static inline DatumGetInt64 where
+// int64 and Datum are both 64-bit longs of different signedness (macOS),
+// leaving an invalid usize -> i64 return.
+fn datumGetInt64(d: pg.Datum) i64 {
+    return @bitCast(@as(u64, d));
+}
+
+// pg.DatumGetFloat8 goes through the broken DatumGetInt64 above.
+fn datumGetFloat8(d: pg.Datum) f64 {
+    return @bitCast(@as(u64, d));
 }
 
 fn datumGetInt8(d: pg.Datum) i8 {
@@ -368,6 +582,92 @@ pub const TestSuite_Datum = struct {
         const d = try toNullableDatum(value);
         try std.testing.expectEqual(false, d.isnull);
         try std.testing.expectEqualStrings("hello world", try fromNullableDatum([:0]const u8, d));
+    }
+
+    pub fn testArrayRoundTrip() !void {
+        const values = [_]i32{ 1, 2, 3 };
+        const d = try toNullableDatum(@as([]const i32, &values));
+        try std.testing.expectEqual(false, d.isnull);
+        try std.testing.expectEqualSlices(i32, &values, try fromNullableDatum([]const i32, d));
+    }
+
+    pub fn testArrayWithNulls() !void {
+        const values = [_]?i64{ 7, null, 9 };
+        const d = try toNullableDatum(@as([]const ?i64, &values));
+        const decoded = try fromNullableDatum([]const ?i64, d);
+        try std.testing.expectEqual(@as(usize, 3), decoded.len);
+        try std.testing.expectEqual(@as(?i64, 7), decoded[0]);
+        try std.testing.expectEqual(@as(?i64, null), decoded[1]);
+        try std.testing.expectEqual(@as(?i64, 9), decoded[2]);
+
+        try std.testing.expectError(err.PGError.UnexpectedNullValue, fromNullableDatum([]const i64, d));
+    }
+
+    pub fn testTextArrayRoundTrip() !void {
+        const values = [_][]const u8{ "a", "bc", "" };
+        const d = try toNullableDatum(@as([]const []const u8, &values));
+        const decoded = try fromNullableDatum([]const []const u8, d);
+        try std.testing.expectEqual(@as(usize, 3), decoded.len);
+        for (values, decoded) |want, got| try std.testing.expectEqualStrings(want, got);
+    }
+
+    pub fn testEmptyArray() !void {
+        const d = try toNullableDatum(@as([]const f64, &.{}));
+        try std.testing.expectEqual(@as(usize, 0), (try fromNullableDatum([]const f64, d)).len);
+    }
+
+    pub fn testArrayElementTypeMismatch() !void {
+        const d = try toNullableDatum(@as([]const i32, &.{1}));
+        try std.testing.expectError(err.PGError.UnexpectedArrayElementType, fromNullableDatum([]const i64, d));
+    }
+
+    pub fn testArrayViewZeroCopy() !void {
+        const values = [_]f64{ 1.5, -2.0, 3.25 };
+        const d = try toNullableDatum(@as([]const f64, &values));
+        const view = try fromNullableDatum(ArrayView(f64), d);
+        try std.testing.expectEqualSlices(f64, &values, view.items);
+
+        // items points into the array value itself, not into a copy.
+        const start = @intFromPtr(pg.DatumGetPointer(d.value));
+        const end = start + varatt.VARSIZE(pg.DatumGetPointer(d.value));
+        const at = @intFromPtr(view.items.ptr);
+        try std.testing.expect(at > start and at + view.items.len * @sizeOf(f64) <= end);
+    }
+
+    pub fn testArrayViewTypes() !void {
+        const ints = [_]i16{ -1, 0, 7 };
+        const iv = try fromNullableDatum(ArrayView(i16), try toNullableDatum(@as([]const i16, &ints)));
+        try std.testing.expectEqualSlices(i16, &ints, iv.items);
+
+        const bools = [_]bool{ true, false, true };
+        const bv = try fromNullableDatum(ArrayView(bool), try toNullableDatum(@as([]const bool, &bools)));
+        try std.testing.expectEqualSlices(bool, &bools, bv.items);
+
+        const empty = try fromNullableDatum(ArrayView(i32), try toNullableDatum(@as([]const i32, &.{})));
+        try std.testing.expectEqual(@as(usize, 0), empty.items.len);
+    }
+
+    pub fn testArrayViewRejectsNulls() !void {
+        const d = try toNullableDatum(@as([]const ?i32, &.{ 1, null }));
+        try std.testing.expectError(err.PGError.UnexpectedNullValue, fromNullableDatum(ArrayView(i32), d));
+    }
+
+    pub fn testArrayViewElementTypeMismatch() !void {
+        const d = try toNullableDatum(@as([]const i32, &.{1}));
+        try std.testing.expectError(err.PGError.UnexpectedArrayElementType, fromNullableDatum(ArrayView(i64), d));
+    }
+
+    pub fn testArrayViewRoundTrip() !void {
+        const values = [_]i32{ 4, 5, 6 };
+        const view: ArrayView(i32) = .{ .items = &values };
+        const d = try toNullableDatum(view);
+        try std.testing.expectEqualSlices(i32, &values, try fromNullableDatum([]const i32, d));
+        try std.testing.expectEqualStrings("real[]", sqlType(ArrayView(f32)));
+    }
+
+    pub fn testArraySqlType() !void {
+        try std.testing.expectEqualStrings("integer[]", sqlType([]const i32));
+        try std.testing.expectEqualStrings("text[]", sqlType([]const ?[]const u8));
     }
 
     pub fn testOptionalNull() !void {

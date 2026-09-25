@@ -1,0 +1,6 @@
+comment = 'pgzx: SPI example (port of pgrx-examples/spi)'
+default_version = '0.1'
+module_pathname = '$libdir/spi'
+relocatable = false
+superuser = false
+schema = 'spi'

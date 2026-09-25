@@ -5,11 +5,53 @@
 //! extension setup.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const pg = @import("pgzx_pgsys");
 
 const err = @import("../err.zig");
 const meta = @import("../meta.zig");
+
+/// The dynahash entry points, resolved from the Postgres executable.
+///
+/// macOS libSystem exports its own `hash_create`, `hash_search` and
+/// `hash_destroy`. Extensions are linked with undefined Postgres symbols
+/// (there is no `-bundle_loader` in the zig linker), so the static linker
+/// binds these three names to libSystem instead of the server, and
+/// `hash_create` returns a libc table that crashes the first dynahash call
+/// (e.g. `hash_get_num_entries`). Look them up in the main executable
+/// instead; everywhere else the plain extern declarations are correct.
+pub const hsearch = if (builtin.os.tag.isDarwin()) struct {
+    pub fn hash_create(tabname: [*c]const u8, nelem: c_long, info: [*c]const pg.HASHCTL, flags: c_int) ?*pg.HTAB {
+        return mainSymbol(@TypeOf(pg.hash_create), "hash_create")(tabname, nelem, info, flags);
+    }
+
+    pub fn hash_destroy(hashp: ?*pg.HTAB) void {
+        mainSymbol(@TypeOf(pg.hash_destroy), "hash_destroy")(hashp);
+    }
+
+    pub fn hash_search(hashp: ?*pg.HTAB, key: ?*const anyopaque, action: pg.HASHACTION, found: [*c]bool) ?*anyopaque {
+        return mainSymbol(@TypeOf(pg.hash_search), "hash_search")(hashp, key, action, found);
+    }
+
+    fn mainSymbol(comptime F: type, comptime name: [:0]const u8) *const F {
+        const cache = struct {
+            var ptr: ?*const F = null;
+        };
+        if (cache.ptr) |p| return p;
+        // RTLD_MAIN_ONLY from <dlfcn.h>: search the main executable only.
+        const main_only: ?*anyopaque = @ptrFromInt(@as(usize, @bitCast(@as(isize, -5))));
+        const sym = std.c.dlsym(main_only, name) orelse
+            @panic("pgzx: " ++ name ++ " not found in the postgres executable");
+        const ptr: *const F = @ptrCast(@alignCast(sym));
+        cache.ptr = ptr;
+        return ptr;
+    }
+} else struct {
+    pub const hash_create = hsearch.hash_create;
+    pub const hash_destroy = hsearch.hash_destroy;
+    pub const hash_search = hsearch.hash_search;
+};
 
 // Configure how the hash value if to be computed.
 const HashValueFunc = union(enum) {
@@ -104,7 +146,7 @@ pub fn HTab(comptime Context: type) type {
             const hctl = options.initHashCtl();
             const flags = options.initFlags();
 
-            const created = try err.wrap(pg.hash_create, .{ name, @as(c_long, @intCast(nelem)), &hctl, flags });
+            const created = try err.wrap(hsearch.hash_create, .{ name, @as(c_long, @intCast(nelem)), &hctl, flags });
             return Self.initFrom(created.?);
         }
 
@@ -130,7 +172,7 @@ pub fn HTab(comptime Context: type) type {
         }
 
         pub inline fn deinit(self: Self) void {
-            pg.hash_destroy(self.htab);
+            hsearch.hash_destroy(self.htab);
         }
 
         pub fn asPtr(self: Self) *pg.HTAB {
@@ -151,11 +193,11 @@ pub fn HTab(comptime Context: type) type {
         }
 
         pub fn getRawEntryPointer(self: Self, key: ?*const anyopaque, found: ?*bool) ?*anyopaque {
-            return pg.hash_search(self.htab, key, pg.HASH_FIND, found);
+            return hsearch.hash_search(self.htab, key, pg.HASH_FIND, found);
         }
 
         pub fn getOrPutRawEntryPointer(self: Self, key: ?*const anyopaque, found: ?*bool) error{OutOfMemory}!?*anyopaque {
-            const p = pg.hash_search(self.htab, key, pg.HASH_ENTER_NULL, found);
+            const p = hsearch.hash_search(self.htab, key, pg.HASH_ENTER_NULL, found);
             if (p == null) {
                 return error.OutOfMemory;
             }
@@ -192,7 +234,7 @@ pub fn HTab(comptime Context: type) type {
 
         pub fn remove(self: Self, key: ConstKeyPtr) bool {
             var found: bool = undefined;
-            _ = pg.hash_search(self.htab, Self.keyPtr(key), pg.HASH_REMOVE, &found);
+            _ = hsearch.hash_search(self.htab, Self.keyPtr(key), pg.HASH_REMOVE, &found);
             return found;
         }
 

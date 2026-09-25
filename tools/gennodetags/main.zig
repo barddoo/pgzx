@@ -1,6 +1,9 @@
 const std = @import("std");
 
 const pg = @cImport({
+    // Must come first: works around a translate-c hang on macOS, see
+    // src/pgzx/c/include/pgzx_translate_prelude.h.
+    @cInclude("pgzx_translate_prelude.h");
     @cInclude("c.h");
     @cInclude("utils/palloc.h");
     @cInclude("nodes/nodes.h");

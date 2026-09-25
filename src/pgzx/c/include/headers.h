@@ -1,5 +1,9 @@
 // C API surface translated at build time (zig 0.15+: @cImport is gone).
 // Kept in sync with the old src/pgzx/c.zig include list.
+
+// Must come first: works around a translate-c hang on macOS (see the file).
+#include "pgzx_translate_prelude.h"
+
 #include "postgres.h"
 
 // translate-c (zig 0.15+) renders bitfield structs such as ItemIdData as
@@ -197,5 +201,8 @@
 #include "tcop/utility.h"
 // libpq support
 #include "libpq-fe.h"
-#include "libpq/libpq-be.h"
+// libpq/libpq-be.h (Port, MyProcPort internals) is intentionally not
+// included: it pulls in openssl and gssapi, ~9k declaration lines and ~14k
+// macros, about 60% of what translate-c has to process. Nothing in pgzx uses
+// it. An extension that needs it can translate it in its own module.
 #include "libpqsrv.h"

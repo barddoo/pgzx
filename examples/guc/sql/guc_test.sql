@@ -19,3 +19,15 @@ SELECT guc_string();
 
 SET guc.sample_enum = 'large';
 SELECT guc_enum();
+
+-- The string check hook rejects an empty value with a custom message and hint.
+SET guc.sample_string = '';
+SELECT guc_string();
+
+-- guc_get reads any setting through pgzx.guc.getOption.
+SELECT guc_get('guc.sample_enum');
+SELECT guc_get('work_mem') IS NOT NULL AS has_work_mem;
+SELECT guc_get('guc.no_such_setting');
+
+-- The "guc" prefix is reserved: unknown guc.* names are rejected.
+SET guc.no_such_setting = 1;

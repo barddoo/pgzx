@@ -19,6 +19,7 @@ pub const PGError = error{
     NotEnoughArguments,
     UnexpectedNullValue,
     StringLengthMismatch,
+    UnexpectedArrayElementType,
 
     // SPI
     SPIError,

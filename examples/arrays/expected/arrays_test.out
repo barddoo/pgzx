@@ -1,0 +1,178 @@
+CREATE EXTENSION arrays;
+SET search_path TO arrays;
+-- Ported from pgrx-examples/arrays
+SELECT sq_euclid(ARRAY[1, 2, 3]::real[], ARRAY[4, 6, 3]::real[]);
+ sq_euclid 
+-----------
+        25
+(1 row)
+
+SELECT sq_euclid(ARRAY[1]::real[], ARRAY[1, 2]::real[]);
+ERROR:  vectors differ in length: 1 vs 2
+SELECT sq_euclid(ARRAY[1, NULL]::real[], ARRAY[1, 2]::real[]);
+ERROR:  Unexpected error: UnexpectedNullValue
+SELECT approx_distance(ARRAY[0, 2, 2]::bigint[], ARRAY[0.5, 1.5, 2.5]::float8[]);
+INFO:  cc=0, d=0.5
+INFO:  cc=2, d=2.5
+INFO:  cc=2, d=2.5
+ approx_distance 
+-----------------
+             5.5
+(1 row)
+
+SELECT approx_distance(ARRAY[3]::bigint[], ARRAY[0.5]::float8[]);
+ERROR:  code 3 out of range for 1 distances
+SELECT default_array();
+ default_array 
+---------------
+ {}
+(1 row)
+
+SELECT sum_array();
+ sum_array 
+-----------
+         0
+(1 row)
+
+SELECT sum_array(ARRAY[1, 2, NULL, 4]);
+ sum_array 
+-----------
+         6
+(1 row)
+
+SELECT sum_vec(ARRAY[1, 2, NULL]);
+ sum_vec 
+---------
+       9
+(1 row)
+
+SELECT static_names();
+        static_names         
+-----------------------------
+ {Brandy,Sally,NULL,Anchovy}
+(1 row)
+
+SELECT i32_array_no_nulls();
+ i32_array_no_nulls 
+--------------------
+ {1,2,3,4,5}
+(1 row)
+
+SELECT i32_array_with_nulls();
+ i32_array_with_nulls  
+-----------------------
+ {1,NULL,2,3,NULL,4,5}
+(1 row)
+
+SELECT strip_nulls(i32_array_with_nulls());
+ strip_nulls 
+-------------
+ {1,2,3,4,5}
+(1 row)
+
+SELECT strip_nulls(ARRAY[]::integer[]);
+ strip_nulls 
+-------------
+ {}
+(1 row)
+
+SELECT sum_vector(ARRAY[0.5, 1.5, 2]::real[]);
+ sum_vector 
+------------
+          4
+(1 row)
+
+-- Zero-copy view: same result; multi-dimensional arrays are flattened.
+SELECT sum_vector_view(ARRAY[0.5, 1.5, 2]::real[]);
+ sum_vector_view 
+-----------------
+               4
+(1 row)
+
+SELECT sum_vector_view(ARRAY[[1, 2], [3, 4]]::real[]);
+ sum_vector_view 
+-----------------
+              10
+(1 row)
+
+SELECT sum_vector_view(ARRAY[]::real[]);
+ sum_vector_view 
+-----------------
+               0
+(1 row)
+
+SELECT sum_vector_view(ARRAY[1, NULL]::real[]);
+ERROR:  Unexpected error: UnexpectedNullValue
+-- SIMD and fast-math variants: 16-lane blocks plus a scalar tail. Small
+-- integers sum exactly, so every variant must agree.
+SELECT n, sum_vector(a) AS plain, sum_vector_simd(a) AS simd, sum_vector_fastmath(a) AS fastmath
+FROM (SELECT n, array_agg(i::real) AS a FROM generate_series(0, 40) n, generate_series(1, n) i GROUP BY n) s
+WHERE n IN (1, 15, 16, 17, 32, 40)
+ORDER BY n;
+ n  | plain | simd | fastmath 
+----+-------+------+----------
+  1 |     1 |    1 |        1
+ 15 |   120 |  120 |      120
+ 16 |   136 |  136 |      136
+ 17 |   153 |  153 |      153
+ 32 |   528 |  528 |      528
+ 40 |   820 |  820 |      820
+(6 rows)
+
+-- Beyond the pgrx example
+SELECT sum_all(1, 2, 3, 4);
+ sum_all 
+---------
+      10
+(1 row)
+
+SELECT sum_all(VARIADIC ARRAY[10, 20]);
+ sum_all 
+---------
+      30
+(1 row)
+
+SELECT clamp_all(ARRAY[-5, 50, 500]);
+ clamp_all  
+------------
+ {0,50,100}
+(1 row)
+
+SELECT clamp_all(ARRAY[-5, 50, 500], hi => 10);
+ clamp_all 
+-----------
+ {0,10,10}
+(1 row)
+
+SELECT clamp_all(ARRAY[-5, 50, 500], -1, 1);
+ clamp_all 
+-----------
+ {-1,1,1}
+(1 row)
+
+SELECT clamp_all(ARRAY[1], 5, 1);
+ERROR:  lo (5) must not exceed hi (1)
+SELECT distinct_sorted(ARRAY[3, 1, 3, 2, 1]);
+ distinct_sorted 
+-----------------
+ {1,2,3}
+(1 row)
+
+SELECT obj_description('clamp_all(integer[],integer,integer)'::regprocedure, 'pg_proc');
+           obj_description           
+-------------------------------------
+ Clamps every element into [lo, hi].
+(1 row)
+
+SELECT proname, procost, provolatile, proisstrict, proparallel
+FROM pg_proc
+WHERE proname IN ('distinct_sorted', 'approx_distance', 'sum_all')
+ORDER BY proname;
+     proname     | procost | provolatile | proisstrict | proparallel 
+-----------------+---------+-------------+-------------+-------------
+ approx_distance |       1 | i           | t           | s
+ distinct_sorted |      10 | i           | t           | u
+ sum_all         |       1 | i           | t           | u
+(3 rows)
+
+DROP EXTENSION arrays;

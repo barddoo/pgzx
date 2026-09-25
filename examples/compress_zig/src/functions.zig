@@ -54,6 +54,10 @@ fn cstr(p: [*c]const u8) []const u8 {
     return std.mem.span(@as([*:0]const u8, @ptrCast(p)));
 }
 
+// Results are read straight from SPI_tuptable, so queries whose rows are used
+// run through `spi.query`, which leaves the tuple table in place until
+// spi.finish. (`spi.exec` frees it, and SPI_freetuptable resets
+// SPI_tuptable to NULL.)
 fn currentTable() !*pg.SPITupleTable {
     return pg.SPI_tuptable orelse error.NoSPIResult;
 }
@@ -75,7 +79,7 @@ fn resolveRelation(alloc: std.mem.Allocator, rel: [:0]const u8) !Resolved {
     const rel_datum = try pgzx.datum.sliceToDatumTextZ(rel);
     const values = [_]pg.NullableDatum{.{ .value = rel_datum, .isnull = false }};
 
-    _ = try pgzx.spi.exec(
+    _ = try pgzx.spi.query(
         "SELECT c.oid::int8, quote_ident(n.nspname) || '.' || quote_ident(c.relname) " ++
             "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " ++
             "WHERE c.oid = $1::regclass",
@@ -87,8 +91,8 @@ fn resolveRelation(alloc: std.mem.Allocator, rel: [:0]const u8) !Resolved {
         return pgzx.elog.Error(@src(), "compress_zig: relation \"{s}\" not found", .{rel});
     }
     const desc = tt.tupdesc;
-    const oid = try std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], desc, 0)), 10);
-    const qualified = pg.SPI_getvalue(tt.vals[0], desc, 1);
+    const oid = try std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], desc, 1)), 10);
+    const qualified = pg.SPI_getvalue(tt.vals[0], desc, 2);
     if (qualified == null) {
         return pgzx.elog.Error(@src(), "compress_zig: could not resolve relation \"{s}\"", .{rel});
     }
@@ -110,7 +114,7 @@ fn loadColumns(alloc: std.mem.Allocator, oid: i64) ![]ColumnMeta {
         .{oid},
         0,
     );
-    _ = try pgzx.spi.exec(sql, .{});
+    _ = try pgzx.spi.query(sql, .{});
 
     const tt = try currentTable();
     const n: usize = @intCast(pg.SPI_processed);
@@ -118,8 +122,8 @@ fn loadColumns(alloc: std.mem.Allocator, oid: i64) ![]ColumnMeta {
     const out = try alloc.alloc(ColumnMeta, n);
     var i: usize = 0;
     while (i < n) : (i += 1) {
-        const name = try alloc.dupe(u8, cstr(pg.SPI_getvalue(tt.vals[i], desc, 0)));
-        const type_oid = try std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[i], desc, 1)), 10);
+        const name = try alloc.dupe(u8, cstr(pg.SPI_getvalue(tt.vals[i], desc, 1)));
+        const type_oid = try std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[i], desc, 2)), 10);
         out[i] = .{ .name = name, .kind = kindFromOid(type_oid) };
     }
     return out;
@@ -166,13 +170,14 @@ fn scanInto(
 
     var r: usize = 0;
     while (r < nrows) : (r += 1) {
-        const raw = pg.SPI_getvalue(tt.vals[r], desc, @intCast(col));
+        // SPI column numbers are 1-based.
+        const raw = pg.SPI_getvalue(tt.vals[r], desc, @intCast(col + 1));
         try nulls.append(raw == null);
 
         if (comptime T == []const u8) {
             try list.append(alloc, if (raw == null) "" else try alloc.dupe(u8, cstr(raw)));
         } else {
-            try list.append(alloc, if (raw == null) 0 else try parseScalar(T, cstr(raw)));
+            try list.append(alloc, if (raw == null) std.mem.zeroes(T) else try parseScalar(T, cstr(raw)));
         }
     }
 }
@@ -240,6 +245,8 @@ const ColumnBuffer = union(enum) {
 /// written and is idempotent: any previous batches for the relation are
 /// dropped first.
 pub fn compress_table(rel: [:0]const u8) !i64 {
+    try pgzx.spi.connect();
+    defer pgzx.spi.finish();
     const alloc = pgzx.mem.PGCurrentContextAllocator;
 
     const res = try resolveRelation(alloc, rel);
@@ -255,7 +262,7 @@ pub fn compress_table(rel: [:0]const u8) !i64 {
     }
 
     const scan_sql = try std.fmt.allocPrintSentinel(alloc, "SELECT * FROM {s}", .{res.qualified}, 0);
-    _ = try pgzx.spi.exec(scan_sql, .{});
+    _ = try pgzx.spi.query(scan_sql, .{});
     const tt = try currentTable();
     const nrows: usize = @intCast(pg.SPI_processed);
 
@@ -274,7 +281,7 @@ pub fn compress_table(rel: [:0]const u8) !i64 {
 
     const encoded = try alloc.alloc(EncodedColumn, cols.len);
     const null_views = try alloc.alloc(?[]const u8, cols.len);
-    const blob_alloc = std.heap.ArenaAllocator.init(alloc);
+    var blob_alloc = std.heap.ArenaAllocator.init(alloc);
     defer blob_alloc.deinit();
     const scratch = blob_alloc.allocator();
 
@@ -337,6 +344,8 @@ fn insertBatch(alloc: std.mem.Allocator, oid: i64, batch_id: i64, row_count: usi
 
 /// Number of batches stored for a relation.
 pub fn batch_count(rel: [:0]const u8) !i64 {
+    try pgzx.spi.connect();
+    defer pgzx.spi.finish();
     const alloc = pgzx.mem.PGCurrentContextAllocator;
     const res = try resolveRelation(alloc, rel);
     try ensureStorage();
@@ -347,13 +356,15 @@ pub fn batch_count(rel: [:0]const u8) !i64 {
         .{res.oid},
         0,
     );
-    _ = try pgzx.spi.exec(sql, .{});
+    _ = try pgzx.spi.query(sql, .{});
     const tt = try currentTable();
-    return std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], tt.tupdesc, 0)), 10);
+    return std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], tt.tupdesc, 1)), 10);
 }
 
 /// Total size in bytes of the compressed payloads for a relation.
 pub fn compressed_size(rel: [:0]const u8) !i64 {
+    try pgzx.spi.connect();
+    defer pgzx.spi.finish();
     const alloc = pgzx.mem.PGCurrentContextAllocator;
     const res = try resolveRelation(alloc, rel);
     try ensureStorage();
@@ -364,9 +375,9 @@ pub fn compressed_size(rel: [:0]const u8) !i64 {
         .{res.oid},
         0,
     );
-    _ = try pgzx.spi.exec(sql, .{});
+    _ = try pgzx.spi.query(sql, .{});
     const tt = try currentTable();
-    return std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], tt.tupdesc, 0)), 10);
+    return std.fmt.parseInt(i64, cstr(pg.SPI_getvalue(tt.vals[0], tt.tupdesc, 1)), 10);
 }
 
 /// Decompress a relation back into a JSON array of row objects.
@@ -374,6 +385,11 @@ pub fn compressed_size(rel: [:0]const u8) !i64 {
 /// Example:
 ///   SELECT jsonb_array_elements(decompress_table('events')::jsonb);
 pub fn decompress_table(rel: [:0]const u8) ![:0]const u8 {
+    // Everything allocated while connected lives in the SPI procedure context
+    // and is freed by spi.finish; the JSON result is copied out to `caller`.
+    var caller = pgzx.mem.MemoryContextAllocator.init(pg.CurrentMemoryContext, .{});
+    try pgzx.spi.connect();
+    defer pgzx.spi.finish();
     const alloc = pgzx.mem.PGCurrentContextAllocator;
     const res = try resolveRelation(alloc, rel);
     const cols = try loadColumns(alloc, res.oid);
@@ -384,7 +400,7 @@ pub fn decompress_table(rel: [:0]const u8) ![:0]const u8 {
         .{res.oid},
         0,
     );
-    _ = try pgzx.spi.exec(sql, .{});
+    _ = try pgzx.spi.query(sql, .{});
 
     const tt = try currentTable();
     const nbatches: usize = @intCast(pg.SPI_processed);
@@ -396,8 +412,8 @@ pub fn decompress_table(rel: [:0]const u8) ![:0]const u8 {
 
     var bi: usize = 0;
     while (bi < nbatches) : (bi += 1) {
-        const row_count = try std.fmt.parseInt(usize, cstr(pg.SPI_getvalue(tt.vals[bi], desc, 0)), 10);
-        const raw = try hexToBytes(alloc, cstr(pg.SPI_getvalue(tt.vals[bi], desc, 1)));
+        const row_count = try std.fmt.parseInt(usize, cstr(pg.SPI_getvalue(tt.vals[bi], desc, 1)), 10);
+        const raw = try hexToBytes(alloc, cstr(pg.SPI_getvalue(tt.vals[bi], desc, 2)));
 
         const view = try compression.BatchView.init(raw);
         const decoded = try alloc.alloc(Decoded, view.col_count);
@@ -435,7 +451,7 @@ pub fn decompress_table(rel: [:0]const u8) ![:0]const u8 {
     }
 
     try out.append(alloc, ']');
-    return out.toOwnedSliceSentinel(alloc, 0);
+    return caller.allocator().dupeZ(u8, out.items);
 }
 
 // ---------------------------------------------------------------------------

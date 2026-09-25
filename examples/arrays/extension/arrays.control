@@ -1,0 +1,6 @@
+comment = 'pgzx: arrays example (port of pgrx-examples/arrays)'
+default_version = '0.1'
+module_pathname = '$libdir/arrays'
+relocatable = false
+superuser = false
+schema = 'arrays'

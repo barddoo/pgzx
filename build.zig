@@ -49,8 +49,10 @@ pub fn build(b: *std.Build) void {
             .cwd_relative = pgbuild.getIncludeDir(),
         });
 
-        // Host C headers: libpq-be.h pulls in openssl/ssl.h and gssapi.h.
-        // translate-c does not add the system include dirs on its own.
+        // Host C headers. translate-c does not add the system include dirs on
+        // its own. These (and PGZX_C_INCLUDE_DIRS below) were needed for
+        // libpq-be.h, which pulls in openssl/ssl.h and gssapi.h; headers.h no
+        // longer includes it, so they only matter if an extension adds it back.
         // The multiarch dir is where Debian keeps opensslconf.h; add the common
         // ones so this works on both x86_64 and aarch64 hosts.
         translate_c.addIncludePath(.{
@@ -109,6 +111,8 @@ pub fn build(b: *std.Build) void {
         });
         tool_module.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeServerDir() });
         tool_module.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeDir() });
+        // pgzx_translate_prelude.h only; Postgres dirs come first.
+        tool_module.addIncludePath(b.path("./src/pgzx/c/include/"));
 
         const tool = b.addExecutable(.{
             .name = "gennodetags",

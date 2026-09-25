@@ -30,6 +30,8 @@ The following sample extensions (ordered from simple to complex) show how to use
 | [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name. |
 | [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns. |
 | [rational](examples/rational/)             | A `rational` base type with btree and hash operator classes. Shows the type system end to end: `pg_type`, operators, `pg_opclass`, casts and how they make indexes and `GROUP BY` work. |
+| [arrays](examples/arrays/)                 | Port of pgrx-examples/arrays. Postgres arrays as Zig slices (`[]const i32`, `[]const ?i32`, `text[]`), plus parameter defaults, `VARIADIC` and `pgzx.IntList`. |
+| [spi](examples/spi/)                       | Port of pgrx-examples/spi. Queries with arguments, a prepared plan kept for the session, cursors fetched in batches, subtransactions that skip failing rows, and `SECURITY DEFINER`. |
 
 ## Docs
 

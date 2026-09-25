@@ -58,3 +58,36 @@ SELECT guc_enum();
  large
 (1 row)
 
+-- The string check hook rejects an empty value with a custom message and hint.
+SET guc.sample_string = '';
+ERROR:  guc.sample_string must not be empty
+HINT:  Use RESET guc.sample_string to restore the default.
+SELECT guc_string();
+ guc_string 
+------------
+ world
+(1 row)
+
+-- guc_get reads any setting through pgzx.guc.getOption.
+SELECT guc_get('guc.sample_enum');
+ guc_get 
+---------
+ large
+(1 row)
+
+SELECT guc_get('work_mem') IS NOT NULL AS has_work_mem;
+ has_work_mem 
+--------------
+ t
+(1 row)
+
+SELECT guc_get('guc.no_such_setting');
+ guc_get 
+---------
+ 
+(1 row)
+
+-- The "guc" prefix is reserved: unknown guc.* names are rejected.
+SET guc.no_such_setting = 1;
+ERROR:  invalid configuration parameter name "guc.no_such_setting"
+DETAIL:  "guc" is a reserved prefix.

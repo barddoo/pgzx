@@ -8,6 +8,7 @@ comptime {
     pgzx.PG_FUNCTION_V1("guc_int", guc_int);
     pgzx.PG_FUNCTION_V1("guc_string", guc_string);
     pgzx.PG_FUNCTION_V1("guc_enum", guc_enum);
+    pgzx.PG_FUNCTION_V1("guc_get", guc_get);
 }
 
 // Custom GUCs, registered in _PG_init.
@@ -25,6 +26,19 @@ fn clampInt(newval: *c_int, extra: *?*anyopaque, source: pgzx.c.GucSource) bool 
     }
     if (newval.* > 100) {
         newval.* = 100;
+    }
+    return true;
+}
+
+// Check hook: reject an empty string. `checkErrMsg`/`checkErrHint` set the
+// message Postgres reports when the hook returns false.
+fn rejectEmpty(newval: *[*c]u8, extra: *?*anyopaque, source: pgzx.c.GucSource) bool {
+    _ = extra;
+    _ = source;
+    if (newval.* == null or newval.*[0] == 0) {
+        pgzx.guc.checkErrMsg("guc.sample_string must not be empty", .{});
+        pgzx.guc.checkErrHint("Use RESET guc.sample_string to restore the default.", .{});
+        return false;
     }
     return true;
 }
@@ -50,6 +64,7 @@ pub export fn _PG_init() void {
         .name = "guc.sample_string",
         .short_desc = "Sample string GUC",
         .initial_value = "hello",
+        .check_hook = pgzx.guc.checkStringHook(rejectEmpty),
     });
 
     sample_enum.register(.{
@@ -62,6 +77,10 @@ pub export fn _PG_init() void {
         },
         .initial_value = 2,
     });
+
+    // All variables are defined: from now on `guc.<typo>` is an error
+    // instead of a silently created placeholder.
+    pgzx.guc.markPrefixReserved("guc");
 }
 
 fn guc_bool() ![:0]const u8 {
@@ -85,12 +104,22 @@ fn guc_enum() ![:0]const u8 {
     };
 }
 
+// Any setting by name, as text; NULL if it does not exist.
+fn guc_get(name: [:0]const u8) !?[:0]const u8 {
+    return pgzx.guc.getOption(name);
+}
+
 const Testsuite = struct {
     pub fn testDefaults() !void {
         try std.testing.expectEqual(false, sample_bool.value);
         try std.testing.expectEqual(@as(c_int, 42), sample_int.value);
         try std.testing.expectEqualStrings("hello", sample_string.value());
         try std.testing.expectEqual(@as(c_int, 2), sample_enum.value);
+    }
+
+    pub fn testSetOption() !void {
+        try pgzx.guc.setOption("guc.sample_string", "from zig", .{ .local = true });
+        try std.testing.expectEqualStrings("from zig", pgzx.guc.getOption("guc.sample_string").?);
     }
 
     pub fn testIntClamp() !void {

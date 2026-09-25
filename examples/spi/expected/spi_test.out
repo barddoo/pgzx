@@ -1,0 +1,125 @@
+CREATE EXTENSION spi;
+SET search_path TO spi;
+-- Ported from pgrx-examples/spi
+SELECT spi_query_random_id() IS NOT NULL AS has_random_id;
+ has_random_id 
+---------------
+ t
+(1 row)
+
+SELECT spi_query_title('Hello There!');
+ spi_query_title 
+-----------------
+               2
+(1 row)
+
+SELECT spi_query_title('no such title');
+ spi_query_title 
+-----------------
+                
+(1 row)
+
+SELECT spi_query_by_id(1);
+INFO:  id=1
+ spi_query_by_id 
+-----------------
+ This is a test
+(1 row)
+
+SELECT spi_query_by_id(42);
+ spi_query_by_id 
+-----------------
+ 
+(1 row)
+
+SELECT spi_insert_title('pgzx');
+ spi_insert_title 
+------------------
+                4
+(1 row)
+
+SELECT spi_query_title('pgzx');
+ spi_query_title 
+-----------------
+               4
+(1 row)
+
+SELECT issue1209_fixed();
+ issue1209_fixed 
+-----------------
+ hello
+(1 row)
+
+-- Prepared plan, kept for the session
+SELECT spi_title_by_id_cached(1);
+ spi_title_by_id_cached 
+------------------------
+ This is a test
+(1 row)
+
+SELECT spi_title_by_id_cached(3);
+ spi_title_by_id_cached 
+------------------------
+ I like pudding
+(1 row)
+
+SELECT spi_title_by_id_cached(42);
+ spi_title_by_id_cached 
+------------------------
+ 
+(1 row)
+
+-- Cursor fetching in batches
+SELECT spi_cursor_count('SELECT * FROM generate_series(1, 2500)', 1000);
+INFO:  2500 rows in 3 batches
+ spi_cursor_count 
+------------------
+             2500
+(1 row)
+
+SELECT spi_cursor_count('SELECT * FROM generate_series(1, 2500)');
+INFO:  2500 rows in 3 batches
+ spi_cursor_count 
+------------------
+             2500
+(1 row)
+
+SELECT spi_cursor_count('SELECT 1 WHERE false', 10);
+INFO:  0 rows in 0 batches
+ spi_cursor_count 
+------------------
+                0
+(1 row)
+
+SELECT spi_cursor_count('SELECT 1', 0);
+ERROR:  batch must be positive, got 0
+-- Subtransactions: the empty title violates the CHECK constraint and is
+-- skipped, the others are kept
+SELECT spi_insert_titles(ARRAY['first', '', 'second']);
+NOTICE:  skipped "": new row for relation "spi_example" violates check constraint "spi_example_title_check"
+ spi_insert_titles 
+-------------------
+                 2
+(1 row)
+
+SELECT title FROM spi_example WHERE title IN ('first', 'second') ORDER BY title;
+ title  
+--------
+ first
+ second
+(2 rows)
+
+-- SECURITY DEFINER with a pinned search_path
+SELECT spi_count_titles();
+ spi_count_titles 
+------------------
+                6
+(1 row)
+
+SELECT prosecdef, proconfig FROM pg_proc WHERE proname = 'spi_count_titles';
+ prosecdef |              proconfig              
+-----------+-------------------------------------
+ t         | {"search_path=pg_catalog, pg_temp"}
+(1 row)
+
+DROP EXTENSION spi;

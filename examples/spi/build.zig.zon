@@ -1,0 +1,14 @@
+.{
+    .name = .spi,
+    .fingerprint = 0xb2a7af1121ee208b,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

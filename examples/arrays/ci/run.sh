@@ -3,7 +3,7 @@
 #set -x
 set -o pipefail
 
-EXTENSION_NAME=compress_zig
+EXTENSION_NAME=arrays
 
 build() {
 	echo "Build extension $EXTENSION_NAME"
@@ -37,7 +37,7 @@ HELP= <<EOF
 Usage: $0 [command]
 
 commands (default 'all'):
-  all - build and run tests
+  all - build nand run tests
   build - build and install extension
   create_extension - create extension
   extension_drop - drop extension
@@ -51,6 +51,7 @@ case $command in
 	create_extension) create_extension ;;
 	extension_drop) extension_drop ;;
 	regression_tests) regression_tests ;;
+	unit_tests) unit_tests ;;
 	help) echo "$HELP" ;;
 	*) echo "$HELP" ;;
 esac
