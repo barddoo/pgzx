@@ -1,5 +1,4 @@
 toplevel @ {
-  config,
   flake-parts-lib,
   inputs,
   lib,
@@ -72,7 +71,6 @@ in {
       config,
       system,
       lib,
-      pkgs,
       ...
     }: {
       _module.args.pkgs = lib.mkForce (import inputs.nixpkgs {

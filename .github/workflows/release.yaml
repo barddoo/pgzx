@@ -1,0 +1,101 @@
+---
+name: Release
+
+# Runs when a version tag is pushed: re-runs the full check, publishes the
+# API docs to GitHub Pages and creates a GitHub release. pgzx is consumed as a
+# Zig package, so the release notes carry the `zig fetch` line (with the
+# package hash) for the tagged source tarball.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check
+    uses: ./.github/workflows/check.yaml
+
+  docs:
+    name: Build docs
+    needs: check
+    runs-on: ubuntu-24.04
+    env:
+      PG_VERSION: "18"
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Create local PostgreSQL installation
+        run: |
+          nix develop --command -- pguse "$PG_VERSION"
+          nix develop --command -- pglocal
+      - name: Generate docs
+        run: nix develop --command -- zig build docs
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: zig-out/share/pgzx/docs
+
+  deploy-docs:
+    name: Deploy docs
+    needs: docs
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: GitHub release
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Compute the Zig package hash
+        id: pkg
+        env:
+          TARBALL: ${{ github.server_url }}/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz
+        run: |
+          hash=$(nix develop --command -- zig fetch "$TARBALL" | tail -n 1)
+          echo "tarball=$TARBALL" >>"$GITHUB_OUTPUT"
+          echo "hash=$hash" >>"$GITHUB_OUTPUT"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          TARBALL: ${{ steps.pkg.outputs.tarball }}
+          HASH: ${{ steps.pkg.outputs.hash }}
+        run: |
+          {
+            echo "## Use this release"
+            echo
+            echo '```sh'
+            echo "zig fetch --save=pgzx $TARBALL"
+            echo '```'
+            echo
+            echo "Package hash: \`$HASH\`"
+            echo
+          } >notes.md
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md --generate-notes

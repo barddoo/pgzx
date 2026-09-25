@@ -5,16 +5,52 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*.*.*"
   pull_request:
     branches:
       - main
+  # Version tags run this through release.yaml.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  # Keep tag and main runs; only supersede stale pull request runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check_project:
-    name: Check
-    runs-on: ubuntu-22.04
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Run commit checks
+        run: nix develop --command -- pre-commit run --all-files --color always
+
+  test:
+    name: Test (${{ matrix.os }}, PostgreSQL ${{ matrix.pg }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One failing PostgreSQL version must not hide the state of the others.
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, pg: "15"}
+          - {os: ubuntu-24.04, pg: "16"}
+          - {os: ubuntu-24.04, pg: "17"}
+          - {os: ubuntu-24.04, pg: "18"}
+          # macOS runners are billed at 10x; cover the latest version only.
+          # It guards the macOS-specific workarounds (translate-c restrict
+          # cycle, libSystem hash_* symbols, DatumGetInt64 translation).
+          - {os: macos-15, pg: "18"}
+    env:
+      # Selects the PostgreSQL version for the dev shell's pg_config.
+      PG_VERSION: ${{ matrix.pg }}
     steps:
       - name: git checkout
         uses: actions/checkout@v4
@@ -27,19 +63,27 @@ jobs:
           path: |
             ~/.cache/zig-pgzx
             ~/.cache/zig
-          key: zig-cache-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon', 'src/pgzx/c/include/headers.h', 'src/pgzx/c/translate.c', 'src/pgzx/c/libpqsrv.c') }}
+          key: zig-${{ runner.os }}-pg${{ matrix.pg }}-${{ hashFiles('flake.lock', 'build.zig.zon', 'src/pgzx/c/include/*.h', 'src/pgzx/c/*.c') }}
           restore-keys: |
-            zig-cache-${{ runner.os }}-
+            zig-${{ runner.os }}-pg${{ matrix.pg }}-
       - name: Init Nix environment
-        run:
-          nix develop --command -- echo "Done"
-      - name: Run Commit checks
+        run: nix develop --command -- echo "Done"
+      - name: Allow the default socket directory
+        if: runner.os == 'Linux'
+        run: sudo chown "$USER" /run/postgresql
+      - name: Create local PostgreSQL ${{ matrix.pg }} installation
         run: |
-          nix develop --command -- pre-commit run --all-files --color always
-      - name: Create local postgres installation
-        run: |
-          sudo chown "$USER" /run/postgresql
+          nix develop --command -- pguse "$PG_VERSION"
           nix develop --command -- ./ci/setup.sh
       - name: Build and run tests
-        run: |
-          nix develop --command -- ./ci/run.sh
+        run: nix develop --command -- ./ci/run.sh
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ matrix.os }}-pg${{ matrix.pg }}
+          path: |
+            out/*/var/postgres/log/server.log
+            examples/*/regression.diffs
+            examples/*/results/
+          if-no-files-found: ignore

@@ -26,6 +26,7 @@ run_example() {
 
 test_pgzx() {
 	rc=0
+	zig build -freference-trace test || rc=1
 	zig build -freference-trace -p "$PG_HOME" unit || rc=1
 	psql -U postgres -c "DROP EXTENSION IF EXISTS pgzx_unit"
 	return $rc
@@ -36,7 +37,8 @@ eval "$(pgenv)"
 
 log_init_size=0
 if [ -f "$PG_CLUSTER_LOG_FILE" ]; then
-	log_init_size=$(stat -c %s "$PG_CLUSTER_LOG_FILE")
+	# wc -c instead of stat: stat flags differ between GNU and BSD (macOS).
+	log_init_size=$(wc -c <"$PG_CLUSTER_LOG_FILE")
 fi
 echo "Server log size: $log_init_size"
 
@@ -69,7 +71,7 @@ ok=true
 if ! $ok; then
 	printf "\n\nServer log:"
 
-	log_size=$(stat -c %s "$PG_CLUSTER_LOG_FILE")
+	log_size=$(wc -c <"$PG_CLUSTER_LOG_FILE")
 	tail -c $((log_size - log_init_size)) "$PG_CLUSTER_LOG_FILE"
 	fail "Regression tests failed"
 fi
