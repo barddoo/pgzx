@@ -234,17 +234,17 @@ inline fn normalizeOid(oid: ?pg.Oid) pg.Oid {
 }
 
 pub const Void = SimpleConv(void, idDatum, toVoid, "void");
-pub const Bool = SimpleConv(bool, pg.DatumGetBool, pg.BoolGetDatum, "boolean");
-pub const Int8 = SimpleConv(i8, datumGetInt8, pg.Int8GetDatum, "smallint");
-pub const Int16 = SimpleConv(i16, pg.DatumGetInt16, pg.Int16GetDatum, "smallint");
-pub const Int32 = SimpleConv(i32, pg.DatumGetInt32, pg.Int32GetDatum, "integer");
-pub const Int64 = SimpleConv(i64, datumGetInt64, pg.Int64GetDatum, "bigint");
-pub const UInt8 = SimpleConv(u8, pg.DatumGetUInt8, pg.UInt8GetDatum, "smallint");
-pub const UInt16 = SimpleConv(u16, pg.DatumGetUInt16, pg.UInt16GetDatum, "integer");
-pub const UInt32 = SimpleConv(u32, pg.DatumGetUInt32, pg.UInt32GetDatum, "bigint");
-pub const UInt64 = SimpleConv(u64, pg.DatumGetUInt64, pg.UInt64GetDatum, "bigint");
-pub const Float32 = SimpleConv(f32, pg.DatumGetFloat4, pg.Float4GetDatum, "real");
-pub const Float64 = SimpleConv(f64, datumGetFloat8, pg.Float8GetDatum, "double precision");
+pub const Bool = SimpleConv(bool, scalar.getBool, scalar.putBool, "boolean");
+pub const Int8 = SimpleConv(i8, scalar.get(i8), scalar.put(i8), "smallint");
+pub const Int16 = SimpleConv(i16, scalar.get(i16), scalar.put(i16), "smallint");
+pub const Int32 = SimpleConv(i32, scalar.get(i32), scalar.put(i32), "integer");
+pub const Int64 = SimpleConv(i64, scalar.get(i64), scalar.put(i64), "bigint");
+pub const UInt8 = SimpleConv(u8, scalar.get(u8), scalar.put(u8), "smallint");
+pub const UInt16 = SimpleConv(u16, scalar.get(u16), scalar.put(u16), "integer");
+pub const UInt32 = SimpleConv(u32, scalar.get(u32), scalar.put(u32), "bigint");
+pub const UInt64 = SimpleConv(u64, scalar.get(u64), scalar.put(u64), "bigint");
+pub const Float32 = SimpleConv(f32, scalar.getFloat4, scalar.putFloat4, "real");
+pub const Float64 = SimpleConv(f64, scalar.getFloat8, scalar.putFloat8, "double precision");
 pub const PGDatum = SimpleConv(pg.Datum, idDatum, idDatum, null);
 
 pub const SliceU8Z = Conv(struct {
@@ -473,21 +473,65 @@ fn toVoid(d: void) pg.Datum {
     return 0;
 }
 
-// translate-c drops the (int64) cast in the static inline DatumGetInt64 where
-// int64 and Datum are both 64-bit longs of different signedness (macOS),
-// leaving an invalid usize -> i64 return.
-fn datumGetInt64(d: pg.Datum) i64 {
-    return @bitCast(@as(u64, d));
-}
+/// Scalar Datum conversions, written in Zig rather than using the translated
+/// `DatumGetInt32`/`Int32GetDatum`/... helpers: those are macros on PG15 and
+/// static inline functions on PG16+, and translate-c mistranslates some of
+/// them (`DatumGetBool` on PG15 becomes a call to the type `bool`;
+/// `DatumGetInt64` on macOS drops its cast). These follow postgres.h:
+/// integers are sign/zero-extended into the Datum like a C cast and truncated
+/// on the way out, `float4` is stored as its `int32` bit pattern (through
+/// Int32GetDatum, so sign-extended) and `float8` as its `int64` bit pattern.
+const scalar = struct {
+    comptime {
+        // PG18 requires a 64-bit Datum; older versions use uintptr_t, which is
+        // 64-bit on every platform pgzx supports.
+        if (@sizeOf(pg.Datum) != 8) @compileError("pgzx.datum: expected a 64-bit Datum");
+    }
 
-// pg.DatumGetFloat8 goes through the broken DatumGetInt64 above.
-fn datumGetFloat8(d: pg.Datum) f64 {
-    return @bitCast(@as(u64, d));
-}
+    fn get(comptime T: type) fn (pg.Datum) T {
+        return struct {
+            fn f(d: pg.Datum) T {
+                const U = @Int(.unsigned, @bitSizeOf(T));
+                return @bitCast(@as(U, @truncate(d)));
+            }
+        }.f;
+    }
 
-fn datumGetInt8(d: pg.Datum) i8 {
-    return @as(i8, @bitCast(@as(i8, @truncate(d))));
-}
+    fn put(comptime T: type) fn (T) pg.Datum {
+        return struct {
+            fn f(v: T) pg.Datum {
+                return switch (@typeInfo(T).int.signedness) {
+                    .signed => @bitCast(@as(i64, v)),
+                    .unsigned => v,
+                };
+            }
+        }.f;
+    }
+
+    fn getBool(d: pg.Datum) bool {
+        return d != 0;
+    }
+
+    fn putBool(v: bool) pg.Datum {
+        return @intFromBool(v);
+    }
+
+    fn getFloat4(d: pg.Datum) f32 {
+        return @bitCast(@as(u32, @truncate(d)));
+    }
+
+    fn putFloat4(v: f32) pg.Datum {
+        return put(i32)(@bitCast(v));
+    }
+
+    fn getFloat8(d: pg.Datum) f64 {
+        return @bitCast(@as(u64, d));
+    }
+
+    fn putFloat8(v: f64) pg.Datum {
+        return @as(u64, @bitCast(v));
+    }
+};
 
 pub fn getDatumStringLike(datum: pg.Datum, oid: pg.Oid) ![]const u8 {
     return getDatumStringLikeZ(datum, oid);
@@ -668,6 +712,58 @@ pub const TestSuite_Datum = struct {
     pub fn testArraySqlType() !void {
         try std.testing.expectEqualStrings("integer[]", sqlType([]const i32));
         try std.testing.expectEqualStrings("text[]", sqlType([]const ?[]const u8));
+    }
+
+    pub fn testScalarRoundTrips() !void {
+        inline for (.{ @as(i8, -128), @as(i16, -32768), @as(i32, -7), @as(i64, std.math.minInt(i64)), @as(u8, 255), @as(u16, 65535), @as(u32, 4294967295), @as(u64, std.math.maxInt(u64)), @as(f32, -1.5), @as(f64, -2.25), true, false }) |v| {
+            const T = @TypeOf(v);
+            try std.testing.expectEqual(v, try fromNullableDatum(T, try toNullableDatum(v)));
+        }
+    }
+
+    /// Decodes Datums produced by the server and feeds Datums encoded here
+    /// back to it, so the Zig conversions are checked against PostgreSQL's own
+    /// representation rather than only against themselves.
+    pub fn testScalarsMatchServer() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.query("SELECT (-5)::int2, (-7)::int4, (-9)::int8, (-1.5)::float4, (-2.25)::float8, true, false", .{ .read_only = true });
+            defer rows.deinit();
+            try std.testing.expect(rows.next());
+            var raw: [7]pg.Datum = undefined;
+            try rows.scan(.{ &raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &raw[5], &raw[6] });
+            try std.testing.expectEqual(@as(i16, -5), try fromDatum(i16, raw[0], false));
+            try std.testing.expectEqual(@as(i32, -7), try fromDatum(i32, raw[1], false));
+            try std.testing.expectEqual(@as(i64, -9), try fromDatum(i64, raw[2], false));
+            try std.testing.expectEqual(@as(f32, -1.5), try fromDatum(f32, raw[3], false));
+            try std.testing.expectEqual(@as(f64, -2.25), try fromDatum(f64, raw[4], false));
+            try std.testing.expectEqual(true, try fromDatum(bool, raw[5], false));
+            try std.testing.expectEqual(false, try fromDatum(bool, raw[6], false));
+        }
+
+        var rows = try spi.queryTyped(bool,
+            \\SELECT $1 = (-5)::int2 AND $2 = (-7)::int4 AND $3 = (-9)::int8
+            \\   AND $4 = (-1.5)::float4 AND $5 = (-2.25)::float8 AND $6 AND NOT $7
+        , .{
+            .read_only = true,
+            .args = .{
+                .types = &.{ pg.INT2OID, pg.INT4OID, pg.INT8OID, pg.FLOAT4OID, pg.FLOAT8OID, pg.BOOLOID, pg.BOOLOID },
+                .values = &.{
+                    try toNullableDatum(@as(i16, -5)),
+                    try toNullableDatum(@as(i32, -7)),
+                    try toNullableDatum(@as(i64, -9)),
+                    try toNullableDatum(@as(f32, -1.5)),
+                    try toNullableDatum(@as(f64, -2.25)),
+                    try toNullableDatum(true),
+                    try toNullableDatum(false),
+                },
+            },
+        });
+        defer rows.deinit();
+        try std.testing.expectEqual(true, (try rows.next()).?);
     }
 
     pub fn testOptionalNull() !void {
