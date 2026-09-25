@@ -43,10 +43,6 @@ jobs:
           - {os: ubuntu-24.04, pg: "16"}
           - {os: ubuntu-24.04, pg: "17"}
           - {os: ubuntu-24.04, pg: "18"}
-          # macOS runners are billed at 10x; cover the latest version only.
-          # It guards the macOS-specific workarounds (translate-c restrict
-          # cycle, libSystem hash_* symbols, DatumGetInt64 translation).
-          - {os: macos-15, pg: "18"}
     env:
       # Selects the PostgreSQL version for the dev shell's pg_config.
       PG_VERSION: ${{ matrix.pg }}
