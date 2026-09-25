@@ -28,7 +28,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Run commit checks
         run: nix develop --command -- pre-commit run --all-files --color always
 
@@ -56,7 +55,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Cache Zig cache
         uses: actions/cache@v4
         with:
@@ -70,7 +68,7 @@ jobs:
         run: nix develop --command -- echo "Done"
       - name: Allow the default socket directory
         if: runner.os == 'Linux'
-        run: sudo chown "$USER" /run/postgresql
+        run: sudo install -d -o "$USER" /run/postgresql
       - name: Create local PostgreSQL ${{ matrix.pg }} installation
         run: |
           nix develop --command -- pguse "$PG_VERSION"

@@ -48,9 +48,9 @@ pub const hsearch = if (builtin.os.tag.isDarwin()) struct {
         return ptr;
     }
 } else struct {
-    pub const hash_create = hsearch.hash_create;
-    pub const hash_destroy = hsearch.hash_destroy;
-    pub const hash_search = hsearch.hash_search;
+    pub const hash_create = pg.hash_create;
+    pub const hash_destroy = pg.hash_destroy;
+    pub const hash_search = pg.hash_search;
 };
 
 // Configure how the hash value if to be computed.
