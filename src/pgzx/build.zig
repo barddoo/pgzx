@@ -705,9 +705,13 @@ pub fn addRegress(b: *Build, options: PGRegressOptions) *Step.Run {
         root_dir,
         "--outputdir",
         root_dir,
-        "--expecteddir",
-        root_dir,
     });
+    // --expecteddir was added in PostgreSQL 16; older versions read the
+    // expected files from --inputdir, which is the same directory here.
+    if (b.getPGMajorVersion() >= 16) {
+        runner.addArg("--expecteddir");
+        runner.addArg(root_dir);
+    }
 
     if (options.db_host) |db_host| {
         runner.addArg("--host");
@@ -811,6 +815,20 @@ fn getPath(b: *Build, path: *?[]const u8, question: []const u8, relative: bool) 
 fn makeRelPath(b: *Build, path: []const u8) []const u8 {
     const cwd = b.getPGHome();
     return std.fs.path.relative(b.std_build.allocator, ".", null, cwd, path) catch @panic("failed to make relative path");
+}
+
+/// Major version of the PostgreSQL installation `pg_config` points at, parsed
+/// from `pg_config --version` (e.g. "PostgreSQL 15.19" or "PostgreSQL 18beta1").
+pub fn getPGMajorVersion(b: *Build) u32 {
+    const version = b.runPGConfig("--version");
+    const prefix = "PostgreSQL ";
+    if (!std.mem.startsWith(u8, version, prefix)) {
+        std.debug.panic("unexpected pg_config --version output: {s}", .{version});
+    }
+    const rest = version[prefix.len..];
+    const end = std.mem.indexOfNone(u8, rest, "0123456789") orelse rest.len;
+    return std.fmt.parseInt(u32, rest[0..end], 10) catch
+        std.debug.panic("unexpected pg_config --version output: {s}", .{version});
 }
 
 pub fn runPGConfig(b: *Build, question: []const u8) []const u8 {
