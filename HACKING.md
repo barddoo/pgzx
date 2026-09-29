@@ -235,6 +235,7 @@ More features, each with a runnable example:
 - Several SQL functions: `examples/sqlfns`.
 - Running SQL from inside the server (SPI): `examples/spi_sql`.
 - Custom GUCs and hooks: `examples/guc`.
+- Backend-safe file I/O and PG18 async reads: `examples/file_io`.
 - Background workers: `examples/bgworker`.
 - Executor hooks, memory contexts, error handling: `examples/pgaudit_zig`.
 

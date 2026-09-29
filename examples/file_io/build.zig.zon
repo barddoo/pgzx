@@ -1,0 +1,14 @@
+.{
+    .name = .file_io,
+    .fingerprint = 0x419a0e4553f44ec,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

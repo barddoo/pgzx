@@ -12,10 +12,12 @@ comptime {
             pgzx.collections.dlist.TestSuite_DList,
             pgzx.collections.htab.TestSuite_HTab,
 
+            pgzx.aio.TestSuite_Aio,
             pgzx.datum.TestSuite_Datum,
             pgzx.ddl.TestSuite_Ddl,
             pgzx.err.TestSuite_Err,
             pgzx.elog.TestSuite_Elog,
+            pgzx.fd.TestSuite_Fd,
             pgzx.intr.TestSuite_Interrupts,
             pgzx.lwlock.TestSuite_LWLock,
             pgzx.meta.TestSuite_Meta,

@@ -80,10 +80,11 @@ pub fn build(b: *std.Build) void {
         // Internal C headers
         module.addIncludePath(b.path("./src/pgzx/c/include/"));
 
-        // libpq support
+        // libpq support + PG18 async I/O shim (bitfield/opaque helpers)
         module.addCSourceFiles(.{
             .files = &[_][]const u8{
                 "./src/pgzx/c/libpqsrv.c",
+                "./src/pgzx/c/aio.c",
             },
             .flags = &[_][]const u8{
                 "-I", pgbuild.getIncludeDir(),

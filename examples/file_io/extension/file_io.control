@@ -1,0 +1,5 @@
+# file_io extension
+comment = 'backend-safe file I/O through the virtual file descriptor layer'
+default_version = '0.1'
+module_pathname = '$libdir/file_io'
+relocatable = true

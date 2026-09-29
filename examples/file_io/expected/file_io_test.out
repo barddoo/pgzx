@@ -1,0 +1,36 @@
+CREATE EXTENSION file_io;
+-- Synchronous roundtrip through a temporary virtual file.
+SELECT file_io_roundtrip('hello, world');
+ file_io_roundtrip 
+-------------------
+ hello, world
+(1 row)
+
+SELECT file_io_roundtrip('') = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT file_io_roundtrip(repeat('abc', 1000)) = repeat('abc', 1000);
+ ?column? 
+----------
+ t
+(1 row)
+
+-- Truncate.
+SELECT file_io_truncate('0123456789', 4);
+ file_io_truncate 
+------------------
+ 0123
+(1 row)
+
+SELECT file_io_truncate('0123456789', 0) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+-- Out-of-range length is reported as a Postgres error.
+SELECT file_io_truncate('abc', 5);
+ERROR:  keep (5) is out of range for 3 bytes
