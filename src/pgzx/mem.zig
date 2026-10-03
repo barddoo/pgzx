@@ -260,7 +260,7 @@ pub const MemoryContextAllocator = struct {
 
     pub fn registerAllocResetCallbackFn(self: *Self, data: ?*anyopaque, f: pg.MemoryContextCallbackFunction) !void {
         const cb = try self.allocator().create(pg.MemoryContextCallback);
-        cb.* = .{ .func = f, .arg = data };
+        cb.* = .{ .func = f, .arg = data, .next = null };
         self.registerResetCallback(cb);
     }
 

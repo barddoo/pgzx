@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Translator = @import("translate_c").Translator;
+
 pub const Build = @import("src/pgzx/build.zig");
 
 pub fn build(b: *std.Build) void {
@@ -27,25 +29,29 @@ pub fn build(b: *std.Build) void {
     // pgzx_pgsys module: C bindings to Postgres
     const pgzx_pgsys = blk: {
         // Translate the Postgres headers once; the module wraps the result.
-        const translate_c = b.addTranslateC(.{
-            .root_source_file = b.path("./src/pgzx/c/include/headers.h"),
+        const translate_c_dep = b.dependency("translate_c", .{});
+        const translator: Translator = .init(translate_c_dep, .{
+            .c_source_file = b.path("./src/pgzx/c/include/headers.h"),
             .target = target,
             .optimize = optimize,
+            // Match the built-in `zig translate-c` default so struct fields are
+            // default-initialized (e.g. `pg.Query{ .commandType = ... }`).
+            .default_init = true,
         });
 
         // Postgres headers first: PG headers included from subdirectories
         // (e.g. storage/bufpage.h including "varatt.h") must resolve to the
         // real files, with our c/include shims only as a fallback (PG15 has
         // no server varatt.h at all).
-        translate_c.addIncludePath(.{
+        translator.addIncludePath(.{
             .cwd_relative = pgbuild.getIncludeServerDir(),
         });
 
         // Internal C headers (libpqsrv.h re-export, varatt.h PG15 shim)
-        translate_c.addIncludePath(b.path("./src/pgzx/c/include/"));
+        translator.addIncludePath(b.path("./src/pgzx/c/include/"));
 
         // Postgres Headers
-        translate_c.addIncludePath(.{
+        translator.addIncludePath(.{
             .cwd_relative = pgbuild.getIncludeDir(),
         });
 
@@ -55,13 +61,13 @@ pub fn build(b: *std.Build) void {
         // longer includes it, so they only matter if an extension adds it back.
         // The multiarch dir is where Debian keeps opensslconf.h; add the common
         // ones so this works on both x86_64 and aarch64 hosts.
-        translate_c.addIncludePath(.{
+        translator.addIncludePath(.{
             .cwd_relative = "/usr/include",
         });
-        translate_c.addIncludePath(.{
+        translator.addIncludePath(.{
             .cwd_relative = "/usr/include/x86_64-linux-gnu",
         });
-        translate_c.addIncludePath(.{
+        translator.addIncludePath(.{
             .cwd_relative = "/usr/include/aarch64-linux-gnu",
         });
 
@@ -71,20 +77,20 @@ pub fn build(b: *std.Build) void {
         if (b.graph.environ_map.get("PGZX_C_INCLUDE_DIRS")) |dirs| {
             var it = std.mem.tokenizeScalar(u8, dirs, ':');
             while (it.next()) |dir| {
-                translate_c.addIncludePath(.{ .cwd_relative = dir });
+                translator.addIncludePath(.{ .cwd_relative = dir });
             }
         }
 
-        const module = translate_c.createModule();
+        const module = translator.mod;
 
-        // Internal C headers
-        module.addIncludePath(b.path("./src/pgzx/c/include/"));
-
-        // libpq support + PG18 async I/O shim (bitfield/opaque helpers)
+        // libpq support + PG18 async I/O shim (bitfield/opaque helpers).
+        // `translator.mod` is owned by the translate-c package, so anchor the
+        // source files back to this build's root.
         module.addCSourceFiles(.{
+            .root = b.path(""),
             .files = &[_][]const u8{
-                "./src/pgzx/c/libpqsrv.c",
-                "./src/pgzx/c/aio.c",
+                "src/pgzx/c/libpqsrv.c",
+                "src/pgzx/c/aio.c",
             },
             .flags = &[_][]const u8{
                 "-I", pgbuild.getIncludeDir(),
@@ -105,8 +111,9 @@ pub fn build(b: *std.Build) void {
     // codegen
     // The codegen produces Zig files that are imported as modules by pgzx.
     const node_tags_src = blk: {
-        const tool_translate = b.addTranslateC(.{
-            .root_source_file = b.path("./tools/gennodetags/translate.h"),
+        const translate_c_dep = b.dependency("translate_c", .{});
+        const tool_translate: Translator = .init(translate_c_dep, .{
+            .c_source_file = b.path("./tools/gennodetags/translate.h"),
             .target = b.graph.host,
             .optimize = .debug,
         });
@@ -120,7 +127,7 @@ pub fn build(b: *std.Build) void {
             .target = b.graph.host,
             .link_libc = true,
         });
-        tool_module.addImport("pg", tool_translate.createModule());
+        tool_module.addImport("pg", tool_translate.mod);
 
         const tool = b.addExecutable(.{
             .name = "gennodetags",
