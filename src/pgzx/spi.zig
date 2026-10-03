@@ -468,8 +468,8 @@ fn scanProcessed(row: usize, values: anytype) !void {
 
 inline fn scanProcessedFrame(frame: SPIFrame, row: usize, values: anytype) !void {
     var column: c_int = 1;
-    inline for (std.meta.fields(@TypeOf(values)), 0..) |field, i| {
-        column = try scanField(field.type, frame, values[i], row, column);
+    inline for (@typeInfo(@TypeOf(values)).@"struct".field_types, 0..) |field_type, i| {
+        column = try scanField(field_type, frame, values[i], row, column);
     }
 }
 
@@ -487,8 +487,8 @@ fn scanField(
     const child_type = meta.pointerElemType(fieldType);
     if (@typeInfo(child_type) == .@"struct") {
         var struct_column = column;
-        inline for (std.meta.fields(child_type)) |field| {
-            const child_ptr = &@field(to.*, field.name);
+        inline for (@typeInfo(child_type).@"struct".field_names) |field_name| {
+            const child_ptr = &@field(to.*, field_name);
             struct_column = try scanField(@TypeOf(child_ptr), frame, child_ptr, row, struct_column);
         }
         return struct_column;

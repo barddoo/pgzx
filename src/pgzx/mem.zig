@@ -294,7 +294,7 @@ pub const MemoryContextAllocator = struct {
         const self: *MemoryContextAllocator = @ptrCast(@alignCast(ctx));
         const memctx = self.ctx;
         const ptr = if (comptime pg.PG_VERSION_NUM >= 160000)
-            pg.MemoryContextAllocAligned(memctx, len, @intFromEnum(ptr_align), self.flags)
+            pg.MemoryContextAllocAligned(memctx, len, @backingInt(ptr_align), self.flags)
         else
             // PG15: no aligned variant; flags are still honored, alignment
             // degrades to MAXALIGN (8).

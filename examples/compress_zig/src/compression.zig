@@ -177,8 +177,8 @@ pub fn writeBatch(
 
         const off = HEADER_SIZE + ci * DIR_ENTRY_SIZE;
         const e = w.list.items[off .. off + DIR_ENTRY_SIZE];
-        e[0] = @intFromEnum(col.encoding);
-        e[1] = @intFromEnum(col.kind);
+        e[0] = @backingInt(col.encoding);
+        e[1] = @backingInt(col.kind);
         e[2] = (if (has_nulls) FLAG_HAS_NULLS else 0) | (if (col.spec.byval) FLAG_BYVAL else 0);
         e[3] = 0;
         putInt(u32, e[4..8], col.spec.oid);

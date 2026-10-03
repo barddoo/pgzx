@@ -43,7 +43,7 @@ pub const IoMethod = enum(c_int) {
 };
 
 pub fn ioMethod() IoMethod {
-    return if (comptime enabled) @enumFromInt(pg.io_method) else .sync;
+    return if (comptime enabled) @fromBackingInt(@intCast(pg.io_method)) else .sync;
 }
 
 /// Where the buffers handed to an async read live.
@@ -137,7 +137,7 @@ pub const AioHandle = if (!enabled) struct {
     /// Block until the I/O completes (or fails).
     pub fn wait(self: *Self) err.ElogIndicator!Status {
         const status = try err.wrap(pg.pgzx_aio_wait, .{self.ptr});
-        return @enumFromInt(status);
+        return @fromBackingInt(@intCast(status));
     }
 
     /// Bytes transferred (meaning is op-specific; for reads, bytes read).

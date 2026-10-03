@@ -75,12 +75,12 @@ fn runTestSuite(T: anytype) !u32 {
 
     elog.Info(@src(), "Running test suite: {s}\n", .{@typeName(T)});
 
-    inline for (@typeInfo(T).@"struct".decls) |f| {
-        if (comptime std.mem.startsWith(u8, f.name, "test")) {
-            elog.Info(@src(), "Running test: {s}\n", .{f.name});
+    inline for (@typeInfo(T).@"struct".decl_names) |f| {
+        if (comptime std.mem.startsWith(u8, f, "test")) {
+            elog.Info(@src(), "Running test: {s}\n", .{f});
 
-            runTestSuiteTest(@field(T, f.name)) catch |e| {
-                elog.Info(@src(), "FAIL: {s}\n", .{f.name});
+            runTestSuiteTest(@field(T, f)) catch |e| {
+                elog.Info(@src(), "FAIL: {s}\n", .{f});
                 return e;
             };
             success_count += 1;

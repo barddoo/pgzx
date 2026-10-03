@@ -96,7 +96,7 @@ fn resolveRelation(alloc: std.mem.Allocator, rel: [:0]const u8) !Resolved {
     if (qualified == null) {
         return pgzx.elog.Error(@src(), "compress_zig: could not resolve relation \"{s}\"", .{rel});
     }
-    return .{ .oid = oid, .qualified = try alloc.dupeZ(u8, cstr(qualified)) };
+    return .{ .oid = oid, .qualified = try alloc.dupeSentinel(u8, cstr(qualified), 0) };
 }
 
 const ColumnMeta = struct {
@@ -451,7 +451,7 @@ pub fn decompress_table(rel: [:0]const u8) ![:0]const u8 {
     }
 
     try out.append(alloc, ']');
-    return caller.allocator().dupeZ(u8, out.items);
+    return caller.allocator().dupeSentinel(u8, out.items, 0);
 }
 
 // ---------------------------------------------------------------------------

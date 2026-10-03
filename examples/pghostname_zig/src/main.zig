@@ -10,7 +10,7 @@ comptime {
 pub fn pghostname_zig() ![:0]const u8 {
     var buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const hostname = std.posix.gethostname(&buffer) catch "unknown";
-    return try pgzx.mem.PGCurrentContextAllocator.dupeZ(u8, hostname);
+    return try pgzx.mem.PGCurrentContextAllocator.dupeSentinel(u8, hostname, 0);
 }
 
 const Testsuite1 = struct {

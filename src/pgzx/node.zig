@@ -40,7 +40,7 @@ pub inline fn boolVal(node: anytype) bool {
 
 pub inline fn make(comptime T: type) *T {
     const node: *pg.Node = @ptrCast(@alignCast(pg.palloc0(@sizeOf(T))));
-    node.*.type = @intFromEnum(mustFindTag(T));
+    node.*.type = @backingInt(mustFindTag(T));
     return @ptrCast(@alignCast(node));
 }
 
@@ -62,11 +62,11 @@ fn mustFindTag(comptime T: type) Tag {
 }
 
 pub inline fn tag(node: anytype) Tag {
-    return @enumFromInt(asNodePtr(node).*.type);
+    return @fromBackingInt(@intCast(asNodePtr(node).*.type));
 }
 
 pub inline fn setTag(node: anytype, t: Tag) void {
-    asNodePtr(node).*.type = @intFromEnum(t);
+    asNodePtr(node).*.type = @backingInt(t);
 }
 
 pub inline fn isA(node: anytype, t: Tag) bool {

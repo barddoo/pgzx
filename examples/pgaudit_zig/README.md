@@ -193,7 +193,7 @@ Note also how this memory context can be placed in the event itself:
 ```zig
     const event = try allocator.create(AuditEvent);
     event.* = .{
-        .command = @enumFromInt(queryDesc.*.operation),
+        .command = @fromBackingInt(@intCast(queryDesc.*.operation)),
         .commandText = commandText,
         .memctx = memctx,
     };
@@ -202,7 +202,7 @@ Note also how this memory context can be placed in the event itself:
 This makes it easy to access the allocator in other hooks, for example:
 
 ```zig
-    const event = audit_events_list.getLast();
+    const event = audit_events_list.last().?;
     var allocator = event.memctx.allocator();
 ```
 

@@ -1,13 +1,6 @@
 const std = @import("std");
 
-const pg = @cImport({
-    // Must come first: works around a translate-c hang on macOS, see
-    // src/pgzx/c/include/pgzx_translate_prelude.h.
-    @cInclude("pgzx_translate_prelude.h");
-    @cInclude("c.h");
-    @cInclude("utils/palloc.h");
-    @cInclude("nodes/nodes.h");
-});
+const pg = @import("pg");
 
 const tagsOnly = std.StaticStringMap(void).initComptime([_]struct { []const u8 }{
     // Internal markers
@@ -52,10 +45,9 @@ pub fn main(init: std.process.Init) !void {
     var node_tags = std.ArrayList([]const u8).empty;
     defer node_tags.deinit(arena);
     const pg_mod = @typeInfo(pg).@"struct";
-    inline for (pg_mod.decls) |decl| {
-        const name = decl.name;
+    inline for (pg_mod.decl_names) |name| {
         if (std.mem.startsWith(u8, name, "T_")) {
-            node_tags.append(arena, decl.name) catch |err| {
+            node_tags.append(arena, name) catch |err| {
                 fatal("build node tags list: {}\n", .{err});
             };
         }
@@ -82,14 +74,14 @@ pub fn main(init: std.process.Init) !void {
         \\pub inline fn findTag(comptime T: type) ?Tag {
         \\    inline for (TypeTagTable) |entry| {
         \\        if (entry[1] == T) {
-        \\            return @enumFromInt(entry[0]);
+        \\            return @fromBackingInt(@intCast(entry[0]));
         \\        }
         \\    }
         \\    return null;
         \\}
         \\
         \\pub inline fn findType(comptime tag: Tag) ?type {
-        \\    const tag_int: c_int = @intCast(@intFromEnum(tag));
+        \\    const tag_int: c_int = @intCast(@backingInt(tag));
         \\    inline for (TypeTagTable) |entry| {
         \\        if (entry[0] == tag_int) {
         \\            return entry[1];

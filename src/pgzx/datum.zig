@@ -582,7 +582,7 @@ pub fn sliceToDatumStringLike(slice: []const u8, oid: pg.Oid) !pg.Datum {
 
 pub inline fn sliceToDatumCString(slice: []const u8) !pg.Datum {
     const alloc = mem.PGCurrentContextAllocator;
-    const slice_z = try alloc.dupeZ(u8, slice);
+    const slice_z = try alloc.dupeSentinel(u8, slice, 0);
     return pg.CStringGetDatum(slice_z.ptr);
 }
 

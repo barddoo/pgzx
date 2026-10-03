@@ -10,7 +10,7 @@ std_build: *std.Build,
 paths: Paths,
 options: struct {
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 },
 debug: DebugOptions,
 
@@ -219,7 +219,7 @@ pub const Project = struct {
         const schema_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = proj.pgbuild.options.target,
-            .optimize = .ReleaseSmall,
+            .optimize = .small,
             .strip = true,
         });
         schema_module.addImport("pgzx", proj.deps.pgzx);
@@ -258,7 +258,7 @@ pub const Project = struct {
             // function bodies, which reference Postgres server symbols that an
             // executable cannot resolve. Build it stripped and optimized so
             // dead code (and its debug info) is discarded.
-            .optimize = .ReleaseSmall,
+            .optimize = .small,
             .strip = true,
         });
         generator_module.addImport("pgzx", proj.deps.pgzx);
@@ -433,7 +433,7 @@ pub const ExtensionVersion = struct {
 pub const InstallExtension = struct {
     lib: *Step.Compile,
     extension_dir: *Step.InstallDir,
-    step: Step,
+    step: *Step,
 
     pub const Options = struct {
         // plugin opts
@@ -447,7 +447,7 @@ pub const InstallExtension = struct {
 
         // shared library options
         target: ?std.Build.ResolvedTarget = null,
-        optimize: ?std.builtin.OptimizeMode = null,
+        optimize: ?std.lang.Optimize = null,
         single_threaded: bool = true,
         link_libc: bool = true,
         link_allow_shlib_undefined: bool = true,
@@ -484,7 +484,7 @@ pub const InstallExtension = struct {
 
 pub const InitOptions = struct {
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     debug: DebugOptions = .{},
 };
 
@@ -612,7 +612,7 @@ pub fn addInstallExtension(b: *Build, options: InstallExtension.Options) *Instal
 
 pub fn installExtension(b: *Build, options: InstallExtension.Options) *InstallExtension {
     const ext = b.addInstallExtension(options);
-    b.std_build.getInstallStep().dependOn(&ext.step);
+    b.std_build.getInstallStep().dependOn(ext.step);
     return ext;
 }
 
@@ -639,8 +639,7 @@ pub fn addInstallExtensionLibArtifact(b: *Build, artifact: *Step.Compile, name: 
     // directly (no sub folders).
     const pg_home = b.getPGHome();
     const package_lib_dir = b.getPackageLibDir();
-    const is_deploy = std.mem.eql(u8, b.std_build.install_prefix, pg_home);
-    const target_lib_dir = if (is_deploy or std.mem.startsWith(u8, package_lib_dir, pg_home))
+    const target_lib_dir = if (std.mem.startsWith(u8, package_lib_dir, pg_home))
         b.makeRelPath(package_lib_dir)
     else
         ".";
@@ -814,7 +813,7 @@ fn getPath(b: *Build, path: *?[]const u8, question: []const u8, relative: bool) 
 
 fn makeRelPath(b: *Build, path: []const u8) []const u8 {
     const cwd = b.getPGHome();
-    return std.fs.path.relative(b.std_build.allocator, ".", null, cwd, path) catch @panic("failed to make relative path");
+    return std.fs.path.relativeAlloc(b.std_build.allocator, ".", null, cwd, path) catch @panic("failed to make relative path");
 }
 
 /// Major version of the PostgreSQL installation `pg_config` points at, parsed
@@ -899,12 +898,8 @@ fn resolvePath(b: *Build, root_dir: []const u8, p: ?[]const u8, default: []const
     return b.std_build.pathJoin(&[_][]const u8{ root_dir, default });
 }
 
-inline fn joinSteps(b: *Build, name: []const u8, steps: anytype) Step {
-    var step = Step.init(.{
-        .id = .custom,
-        .name = name,
-        .owner = b.std_build,
-    });
+inline fn joinSteps(b: *Build, name: []const u8, steps: anytype) *Step {
+    const step = b.std_build.step(name, "");
     inline for (steps) |s| {
         step.dependOn(s);
     }

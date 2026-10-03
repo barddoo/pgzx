@@ -110,7 +110,7 @@ fn executorStartHook(queryDesc: [*c]pg.QueryDesc, eflags: c_int) !void {
 
     const event = try allocator.create(AuditEvent);
     event.* = .{
-        .command = @enumFromInt(queryDesc.*.operation),
+        .command = @fromBackingInt(@intCast(queryDesc.*.operation)),
         .commandText = commandText,
         .memctx = memctx,
     };
@@ -146,7 +146,7 @@ fn executorCheckPermsHook(rangeTables: [*c]pg.List, violation: bool) error{ OutO
     _ = violation;
 
     const list = try getAuditList();
-    const event = list.getLast();
+    const event = list.last().?;
     var allocator = event.memctx.allocator();
 
     var relList = std.ArrayList(RelEntry).empty;
@@ -328,7 +328,7 @@ const Tests = struct {
         const list = try getAuditList();
         try list.append(global_memctx.allocator(), event);
 
-        const last = list.getLast();
+        const last = list.last().?;
         try std.testing.expectEqual(event, last);
 
         const popped = try popEvent(list, query_ctx);

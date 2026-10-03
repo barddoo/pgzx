@@ -183,19 +183,20 @@ fn coerceSlice(comptime T: type, comptime raw: anytype) []const T {
                 continue;
             }
             const I = @TypeOf(item);
-            for (@typeInfo(I).@"struct".fields) |field| {
-                if (!@hasField(T, field.name)) {
-                    @compileError("pgzx.ddl: unknown " ++ @typeName(T) ++ " field '" ++ field.name ++ "'");
+            for (@typeInfo(I).@"struct".field_names) |field_name| {
+                if (!@hasField(T, field_name)) {
+                    @compileError("pgzx.ddl: unknown " ++ @typeName(T) ++ " field '" ++ field_name ++ "'");
                 }
             }
             var value: T = undefined;
-            for (@typeInfo(T).@"struct".fields) |field| {
-                if (@hasField(I, field.name)) {
-                    @field(value, field.name) = @field(item, field.name);
-                } else if (field.defaultValue()) |default| {
-                    @field(value, field.name) = default;
+            const t_info = @typeInfo(T).@"struct";
+            for (t_info.field_names, t_info.field_types, t_info.field_attrs) |field_name, field_type, field_attrs| {
+                if (@hasField(I, field_name)) {
+                    @field(value, field_name) = @field(item, field_name);
+                } else if (field_attrs.defaultValue(field_type)) |default| {
+                    @field(value, field_name) = default;
                 } else {
-                    @compileError("pgzx.ddl: missing " ++ @typeName(T) ++ " field '" ++ field.name ++ "'");
+                    @compileError("pgzx.ddl: missing " ++ @typeName(T) ++ " field '" ++ field_name ++ "'");
                 }
             }
             out[i] = value;
@@ -248,7 +249,7 @@ fn renderFunction(writer: anytype, comptime decl: anytype) !void {
         @compileError("pgzx.ddl: `func` for '" ++ F.name ++ "' must be a function");
     }
     const fn_info = type_info.@"fn";
-    if (fn_info.is_generic or fn_info.is_var_args) {
+    if (fn_info.is_generic or fn_info.attrs.varargs) {
         @compileError("pgzx.ddl: '" ++ F.name ++ "' must not be generic or variadic");
     }
 
@@ -324,15 +325,15 @@ fn hasOutputParams(comptime F: anytype) bool {
 fn derivedArgTypes(comptime F: anytype, comptime fn_info: anytype) []const []const u8 {
     comptime {
         var n: usize = 0;
-        for (fn_info.params) |param| {
-            const P = param.type orelse
+        for (fn_info.param_types) |param| {
+            const P = param orelse
                 @compileError("pgzx.ddl: '" ++ F.name ++ "' has an unresolved parameter type");
             if (P != pg.FunctionCallInfo) n += 1;
         }
         var types: [n][]const u8 = undefined;
         var i: usize = 0;
-        for (fn_info.params) |param| {
-            const P = param.type.?;
+        for (fn_info.param_types) |param| {
+            const P = param.?;
             if (P == pg.FunctionCallInfo) continue;
             types[i] = datum.sqlType(P);
             i += 1;

@@ -105,15 +105,22 @@ pub fn build(b: *std.Build) void {
     // codegen
     // The codegen produces Zig files that are imported as modules by pgzx.
     const node_tags_src = blk: {
+        const tool_translate = b.addTranslateC(.{
+            .root_source_file = b.path("./tools/gennodetags/translate.h"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        });
+        tool_translate.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeServerDir() });
+        tool_translate.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeDir() });
+        // pgzx_translate_prelude.h only; Postgres dirs come first.
+        tool_translate.addIncludePath(b.path("./src/pgzx/c/include/"));
+
         const tool_module = b.createModule(.{
             .root_source_file = b.path("./tools/gennodetags/main.zig"),
             .target = b.graph.host,
             .link_libc = true,
         });
-        tool_module.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeServerDir() });
-        tool_module.addIncludePath(.{ .cwd_relative = pgbuild.getIncludeDir() });
-        // pgzx_translate_prelude.h only; Postgres dirs come first.
-        tool_module.addIncludePath(b.path("./src/pgzx/c/include/"));
+        tool_module.addImport("pg", tool_translate.createModule());
 
         const tool = b.addExecutable(.{
             .name = "gennodetags",
@@ -228,7 +235,7 @@ pub fn build(b: *std.Build) void {
             },
         });
 
-        steps.install_unit.dependOn(&tests.step);
+        steps.install_unit.dependOn(tests.step);
 
         break :blk tests;
     };
@@ -241,7 +248,7 @@ pub fn build(b: *std.Build) void {
             .db_port = 5432,
         });
 
-        psql_run_tests.step.dependOn(&test_ext.step);
+        psql_run_tests.step.dependOn(test_ext.step);
         steps.unit.dependOn(&psql_run_tests.step);
     }
 }

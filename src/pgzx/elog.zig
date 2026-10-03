@@ -118,7 +118,7 @@ pub inline fn errsaveDomainValueNoJump(src: SourceLocation, context: ?*pg.Node, 
 }
 
 pub inline fn errstart(level: Level, domain: ?[:0]const u8) bool {
-    return pg.errstart(@intFromEnum(level), if (domain) |d| d.ptr else null);
+    return pg.errstart(@backingInt(level), if (domain) |d| d.ptr else null);
 }
 
 /// Finalize the current error report and raise a Postgres error if the error level is `ERROR`.
@@ -241,7 +241,7 @@ pub const OptField = struct {
     value: [:0]const u8,
 
     pub inline fn call(self: OptField) void {
-        _ = pg.err_generic_string(@intFromEnum(self.field), self.value);
+        _ = pg.err_generic_string(@backingInt(self.field), self.value);
     }
 };
 
@@ -368,7 +368,7 @@ pub fn logFn(
     const scope_prefix = @tagName(scope) ++ " ";
     const prefix = "Internal [" ++ comptime level.asText() ++ "] " ++ scope_prefix;
 
-    if (!api.errstart(@enumFromInt(options.postgresLogFnLeven), null)) {
+    if (!api.errstart(@fromBackingInt(@intCast(options.postgresLogFnLeven)), null)) {
         return;
     }
     api.errcode(pg.ERRCODE_INTERNAL_ERROR).call();
@@ -586,7 +586,7 @@ pub fn emitIfPGError(e: anyerror) bool {
 }
 
 fn sendElog(src: SourceLocation, comptime level: c_int, comptime fmt: []const u8, args: anytype) void {
-    api.ereport(src, @enumFromInt(level), .{
+    api.ereport(src, @fromBackingInt(@intCast(level)), .{
         api.errmsg(fmt, args),
     });
 }
@@ -597,7 +597,7 @@ fn sendElogWithCause(src: SourceLocation, comptime level: c_int, cause: anyerror
         return;
     }
 
-    if (!api.errstart(@enumFromInt(level), null)) {
+    if (!api.errstart(@fromBackingInt(@intCast(level)), null)) {
         return;
     }
 

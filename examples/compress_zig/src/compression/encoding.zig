@@ -155,7 +155,7 @@ fn isBytes(comptime T: type) bool {
 fn ScalarBits(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int => T,
-        .float => std.meta.Int(.unsigned, @bitSizeOf(T)),
+        .float => @Int(.unsigned, @bitSizeOf(T)),
         else => @compileError("encode: int or float expected, got " ++ @typeName(T)),
     };
 }

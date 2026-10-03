@@ -7,9 +7,9 @@ const meta = @import("pgzx/meta.zig");
 /// for modules that do not depend on a live Postgres server. Add more suites
 /// here as modules become free of `pgzx_pgsys`.
 fn runSuite(comptime S: type) !void {
-    inline for (comptime std.meta.declarations(S)) |decl| {
-        if (comptime std.mem.startsWith(u8, decl.name, "test")) {
-            try @field(S, decl.name)();
+    inline for (comptime std.meta.declarations(S)) |decl_name| {
+        if (comptime std.mem.startsWith(u8, decl_name, "test")) {
+            try @field(S, decl_name)();
         }
     }
 }

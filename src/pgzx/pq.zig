@@ -109,7 +109,7 @@ pub const Conn = struct {
         defer arena.deinit();
         const local_allocator = arena.allocator();
 
-        const conninfoZ = try local_allocator.dupeZ(u8, conninfo);
+        const conninfoZ = try local_allocator.dupeSentinel(u8, conninfo, 0);
         const connector = if (options.wait) &pqsrv.connect else &pqsrv.connectAsync;
         const conn = Self.init(allocator, try connector(conninfoZ));
         conn.checkConnSuccess(options) catch |e| {
@@ -528,8 +528,8 @@ const PGConnParams = struct {
         var i: usize = 0;
         var it = in.iterator();
         while (it.next()) |entry| {
-            keys[i] = try alloc.dupeZ(u8, entry.key_ptr.*);
-            values[i] = try alloc.dupeZ(u8, entry.value_ptr.*);
+            keys[i] = try alloc.dupeSentinel(u8, entry.key_ptr.*, 0);
+            values[i] = try alloc.dupeSentinel(u8, entry.value_ptr.*, 0);
             i += 1;
         }
         keys[i] = null;
@@ -660,17 +660,17 @@ pub fn buildParams(
     // The buffer might grow and pointers might get invalidated.
     // Let's collect the positions of the values in the buffer so we can
     // collect the pointers after the encoding buffer has been fully written.
-    var value_indices = try local_allocator.alloc(i32, argsInfo.@"struct".fields.len);
+    var value_indices = try local_allocator.alloc(i32, argsInfo.@"struct".field_types.len);
 
     const writer: std.ArrayList(u8).Writer = buffer.writer();
-    var types = try allocator.alloc(pg.Oid, argsInfo.@"struct".fields.len);
+    var types = try allocator.alloc(pg.Oid, argsInfo.@"struct".field_types.len);
 
-    inline for (argsInfo.@"struct".fields, 0..) |field, idx| {
-        const codec = conv.find(field.type);
+    inline for (argsInfo.@"struct".field_types, argsInfo.@"struct".field_names, 0..) |field_type, field_name, idx| {
+        const codec = conv.find(field_type);
         types[idx] = codec.OID;
 
         const initPos = buffer.items.len;
-        try codec.write(writer, @field(args, field.name));
+        try codec.write(writer, @field(args, field_name));
         const pos = buffer.items.len;
         if (initPos == pos) {
             value_indices[idx] = -1;
@@ -858,7 +858,7 @@ pub const FieldDescription = struct {
 
     pub fn format(self: FieldDescription) FormatCode {
         const c = pg.PQfformat(self.result.result, @intCast(self.idx));
-        return @enumFromInt(c);
+        return @fromBackingInt(@intCast(c));
     }
 
     pub fn typeOID(self: FieldDescription) pg.Oid {

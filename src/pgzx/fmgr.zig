@@ -82,18 +82,18 @@ pub inline fn PG_FUNCTION_V1(comptime name: []const u8, comptime callback: anyty
 }
 
 pub inline fn PG_EXPORT(comptime mod: type) void {
-    const decls = switch (@typeInfo(mod)) {
-        .@"struct" => |s| s.decls,
+    const decl_names = switch (@typeInfo(mod)) {
+        .@"struct" => |s| s.decl_names,
         else => @compileError("PG_EXPORT requires a struct"),
     };
 
-    inline for (decls) |decl| {
-        const value = @field(mod, decl.name);
+    inline for (decl_names) |decl_name| {
+        const value = @field(mod, decl_name);
         const ft = @typeInfo(@TypeOf(value));
-        if (ft != .@"fn" or ft.@"fn".is_generic or ft.@"fn".is_var_args) {
+        if (ft != .@"fn" or ft.@"fn".is_generic or ft.@"fn".attrs.varargs) {
             continue;
         }
-        PG_FUNCTION_V1(decl.name, value);
+        PG_FUNCTION_V1(decl_name, value);
     }
 }
 
@@ -119,8 +119,8 @@ pub inline fn pgCall(
 
     var callArgs: funcArgType = undefined;
     comptime var info_idx = 0;
-    inline for (std.meta.fields(@TypeOf(callArgs)), 0..) |field, i| {
-        const arg = ArgType(field.type);
+    inline for (@typeInfo(@TypeOf(callArgs)).@"struct".field_types, 0..) |field_type, i| {
+        const arg = ArgType(field_type);
         callArgs[i] = arg.read(fcinfo, info_idx) catch |e| elog.throwAsPostgresError(src, e);
         if (arg.consumesArgument()) {
             info_idx += 1;
