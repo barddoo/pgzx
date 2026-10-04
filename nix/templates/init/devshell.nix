@@ -40,9 +40,6 @@ in {
       # We also need a local postgres for pglocal that we install in the devshell.
       pkgs.pgzx_scripts
       pkgs.postgresql_16_jit
-
-      # Additional Zig tools.
-      pkgs.zls # Zig Language Server
     ];
 
   # On shell startup we must set some environment variables for the pgzx scripts:

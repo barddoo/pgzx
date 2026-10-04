@@ -65,7 +65,6 @@
 
           src = ./.;
           nativeBuildInputs = [
-            pkgs.zigpkgs.master
             pkgs.pkg-config
           ];
 

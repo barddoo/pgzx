@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: git checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
       - name: Run commit checks
@@ -48,9 +48,13 @@ jobs:
       PG_VERSION: ${{ matrix.pg }}
     steps:
       - name: git checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
       - name: Cache Zig cache
         uses: actions/cache@v4
         with:

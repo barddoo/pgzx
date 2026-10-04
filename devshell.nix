@@ -104,9 +104,6 @@ in {
       pkgs.python3
 
       pkgs.pkg-config
-
-      pkgs.zigpkgs.stable
-      pkgs.zls
     ];
 
   shellHook = ''

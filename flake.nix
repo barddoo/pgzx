@@ -16,18 +16,7 @@
     self,
     nixpkgs,
     ...
-  }: let
-    # pgzx uses the Zig toolchain that nixpkgs ships (currently Zig 0.16 on
-    # nixpkgs-unstable). The `zigpkgs` overlay keeps the attribute names that
-    # the rest of the flake and downstream templates rely on.
-    zigpkgs-overlay = _final: prev: {
-      zigpkgs = {
-        default = prev.zig;
-        stable = prev.zig;
-        master = prev.zig;
-      };
-    };
-  in
+  }:
     inputs.parts.lib.mkFlake {inherit inputs;} {
       debug = true;
 
@@ -38,10 +27,8 @@
 
       flake.overlays = rec {
         default = nixpkgs.lib.composeManyExtensions [
-          zigpkgs
           pgzx_scripts
         ];
-        zigpkgs = zigpkgs-overlay;
         pgzx_scripts = _final: prev: {
           pgzx_scripts = self.packages.${prev.system}.pgzx_scripts;
         };
@@ -65,9 +52,6 @@
       }: {
         nixpkgs = {
           config.allowBroken = true;
-          overlays = [
-            zigpkgs-overlay
-          ];
         };
 
         pre-commit.pkgs = pkgs;
@@ -90,14 +74,6 @@
               description = "Shell script formatter";
               types = ["shell"];
               entry = "${pkgs.shfmt}/bin/shfmt -d -i 0 -ci -s";
-            };
-
-            # zig linters
-            zigfmt = {
-              enable = true;
-              name = "Zig fmt";
-              entry = "${pkgs.zigpkgs.stable}/bin/zig fmt --check";
-              files = "\\.zig$|\\.zon$";
             };
           };
         };

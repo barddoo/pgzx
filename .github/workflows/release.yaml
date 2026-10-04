@@ -31,9 +31,13 @@ jobs:
       PG_VERSION: "18"
     steps:
       - name: git checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
       - name: Create local PostgreSQL installation
         run: |
           nix develop --command -- pguse "$PG_VERSION"
@@ -68,9 +72,13 @@ jobs:
       contents: write
     steps:
       - name: git checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
       - name: Compute the Zig package hash
         id: pkg
         env:
