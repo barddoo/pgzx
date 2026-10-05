@@ -10,6 +10,7 @@ pub const c = @import("pgzx_pgsys"); // keep for backwards compatibility
 pub const pg = c;
 
 // Utility functions for working with the PostgreSQL C API.
+pub const atomics = @import("pgzx/atomics.zig");
 pub const bgworker = @import("pgzx/bgworker.zig");
 
 pub const collections = @import("pgzx/collections.zig");
@@ -49,11 +50,16 @@ pub const PG_EXPORT = fmgr.PG_EXPORT;
 
 pub const lwlock = @import("pgzx/lwlock.zig");
 pub const mem = @import("pgzx/mem.zig");
+pub const pgbox = @import("pgzx/pgbox.zig");
+pub const PgBox = pgbox.PgBox;
 pub const pq = @import("pgzx/pq.zig");
 pub const shmem = @import("pgzx/shmem.zig");
 pub const spi = @import("pgzx/spi.zig");
+pub const spinlock = @import("pgzx/spinlock.zig");
+pub const SpinLock = spinlock.SpinLock;
 pub const str = @import("pgzx/str.zig");
 pub const utils = @import("pgzx/utils.zig");
+pub const xid = @import("pgzx/xid.zig");
 pub const intr = @import("pgzx/interrupts.zig");
 pub const testing = @import("pgzx/testing.zig");
 

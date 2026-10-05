@@ -91,6 +91,7 @@ pub fn build(b: *std.Build) void {
             .files = &[_][]const u8{
                 "src/pgzx/c/libpqsrv.c",
                 "src/pgzx/c/aio.c",
+                "src/pgzx/c/spin.c",
             },
             .flags = &[_][]const u8{
                 "-I", pgbuild.getIncludeDir(),

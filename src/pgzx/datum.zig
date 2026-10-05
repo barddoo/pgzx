@@ -7,6 +7,7 @@ const itemptr = @import("itemptr.zig");
 const mem = @import("mem.zig");
 const meta = @import("meta.zig");
 const varatt = @import("varatt.zig");
+const xid = @import("xid.zig");
 
 pub fn fromNullableDatum(comptime T: type, d: pg.NullableDatum) !T {
     return findConv(T).fromNullableDatum(d);
@@ -146,6 +147,9 @@ pub fn OptConv(comptime C: anytype) type {
 var directMappings = .{
     .{ pg.Datum, PGDatum },
     .{ pg.ItemPointerData, Tid },
+    .{ xid.Xid, XidConv },
+    .{ xid.Cid, CidConv },
+    .{ xid.Xid8, Xid8Conv },
     .{ Uuid, UuidConv },
     .{ Bytea, ByteaConv },
     .{ Date, DateConv },
@@ -284,6 +288,36 @@ pub const Tid = Conv(struct {
         return pg.ItemPointerGetDatum(tid);
     }
 });
+
+// Transaction identifier types. `xid` and `cid` are passed by value as 32-bit
+// integers, `xid8` as a 64-bit integer. See `xid.zig` for the Zig types.
+const XidConv = SimpleConv(xid.Xid, getXid, putXid, "xid");
+const CidConv = SimpleConv(xid.Cid, getCid, putCid, "cid");
+const Xid8Conv = SimpleConv(xid.Xid8, getXid8, putXid8, "xid8");
+
+fn getXid(d: pg.Datum) xid.Xid {
+    return .{ .value = scalar.get(u32)(d) };
+}
+
+fn putXid(v: xid.Xid) pg.Datum {
+    return scalar.put(u32)(v.value);
+}
+
+fn getCid(d: pg.Datum) xid.Cid {
+    return .{ .value = scalar.get(u32)(d) };
+}
+
+fn putCid(v: xid.Cid) pg.Datum {
+    return scalar.put(u32)(v.value);
+}
+
+fn getXid8(d: pg.Datum) xid.Xid8 {
+    return .{ .value = scalar.get(u64)(d) };
+}
+
+fn putXid8(v: xid.Xid8) pg.Datum {
+    return scalar.put(u64)(v.value);
+}
 
 // ---------------------------------------------------------------------------
 // Built-in non-scalar types: uuid, bytea and the date/time family.
@@ -976,6 +1010,86 @@ pub const TestSuite_Datum = struct {
         const decoded = try fromNullableDatum(pg.ItemPointerData, d);
         try std.testing.expectEqual(@as(pg.BlockNumber, 42), itemptr.itemPointerGetBlockNumberNoCheck(decoded));
         try std.testing.expectEqual(@as(pg.OffsetNumber, 7), itemptr.itemPointerGetOffsetNumberNoCheck(decoded));
+    }
+
+    pub fn testXidRoundTrip() !void {
+        const x: xid.Xid = .{ .value = 0xFFFFFFF0 };
+        const d = try toNullableDatum(x);
+        try std.testing.expectEqual(false, d.isnull);
+        try std.testing.expectEqual(x.value, (try fromNullableDatum(xid.Xid, d)).value);
+
+        const c: xid.Cid = .{ .value = 7 };
+        try std.testing.expectEqual(c.value, (try fromNullableDatum(xid.Cid, try toNullableDatum(c))).value);
+
+        const full: xid.Xid8 = .fromParts(3, .{ .value = 99 });
+        try std.testing.expectEqual(full.value, (try fromNullableDatum(xid.Xid8, try toNullableDatum(full))).value);
+    }
+
+    pub fn testXidSqlNames() !void {
+        try std.testing.expectEqualStrings("xid", sqlType(xid.Xid));
+        try std.testing.expectEqualStrings("cid", sqlType(xid.Cid));
+        try std.testing.expectEqualStrings("xid8", sqlType(xid.Xid8));
+    }
+
+    /// Checks the Zig `xid`, `cid` and `xid8` conversions against the server.
+    pub fn testXidMatchesServer() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        // server -> Zig
+        {
+            var rows = try spi.queryTyped(xid.Xid, "SELECT '4000000000'::xid", .{ .read_only = true });
+            defer rows.deinit();
+            try std.testing.expectEqual(@as(u32, 4000000000), (try rows.next()).?.value);
+        }
+        {
+            var rows = try spi.queryTyped(xid.Cid, "SELECT '12'::cid", .{ .read_only = true });
+            defer rows.deinit();
+            try std.testing.expectEqual(@as(u32, 12), (try rows.next()).?.value);
+        }
+        {
+            var rows = try spi.queryTyped(xid.Xid8, "SELECT '4294967299'::xid8", .{ .read_only = true });
+            defer rows.deinit();
+            const full = (try rows.next()).?;
+            try std.testing.expectEqual(@as(u32, 1), full.epoch());
+            try std.testing.expectEqual(@as(u32, 3), full.xid().value);
+        }
+
+        // Zig -> server
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1 = '4000000000'::xid", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.XIDOID},
+                    .values = &.{try toNullableDatum(xid.Xid{ .value = 4000000000 })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::text = '12'", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.CIDOID},
+                    .values = &.{try toNullableDatum(xid.Cid{ .value = 12 })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1 = '4294967299'::xid8", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.XID8OID},
+                    .values = &.{try toNullableDatum(xid.Xid8.fromParts(1, .{ .value = 3 }))},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
     }
 
     /// Checks the Zig `tid` conversions against the server's own representation.

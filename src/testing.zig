@@ -14,6 +14,7 @@ comptime {
             pgzx.collections.htab.TestSuite_HTab,
 
             pgzx.aio.TestSuite_Aio,
+            pgzx.atomics.TestSuite_Atomics,
             pgzx.datum.TestSuite_Datum,
             pgzx.ddl.TestSuite_Ddl,
             pgzx.err.TestSuite_Err,
@@ -25,10 +26,13 @@ comptime {
             pgzx.meta.TestSuite_Meta,
             pgzx.mem.TestSuite_Mem,
             pgzx.node.TestSuite_Node,
+            pgzx.pgbox.TestSuite_PgBox,
             pgzx.shmem.TestSuite_Shmem,
             pgzx.spi.TestSuite_Spi,
+            pgzx.spinlock.TestSuite_SpinLock,
             pgzx.str.TestSuite_Str,
             pgzx.guc.TestSuite_Guc,
+            pgzx.xid.TestSuite_Xid,
             varatt.TestSuite_Varatt,
         },
     );

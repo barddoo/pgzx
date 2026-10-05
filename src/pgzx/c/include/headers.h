@@ -176,6 +176,7 @@
 #include "storage/pg_shmem.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
+#include "spin_helpers.h"
 #include "storage/fd.h"
 // storage/aio.h (PgAioHandle and the pgaio_* API) only exists on PG18+.
 // aio_helpers.h wraps the bitfield structs translate-c demotes to opaque.
