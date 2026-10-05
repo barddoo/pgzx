@@ -5,6 +5,7 @@ const meta = @import("meta.zig");
 const mem = @import("mem.zig");
 const err = @import("err.zig");
 const datum = @import("datum.zig");
+const heap_tuple = @import("heap_tuple.zig");
 
 pub fn connect() err.PGError!void {
     const status = pg.SPI_connect();
@@ -94,19 +95,19 @@ fn execImpl(sql: [:0]const u8, options: ExecOptions) SPIError!c_int {
             break :blk buf.ptr;
         };
 
-        const status = pg.SPI_execute_with_args(
+        const status = try err.wrap(pg.SPI_execute_with_args, .{
             sql.ptr,
-            @intCast(n),
-            @constCast(args.types.ptr),
+            @as(c_int, @intCast(n)),
+            @as([*c]pg.Oid, @constCast(args.types.ptr)),
             values,
             nulls,
             options.read_only,
             options.limit,
-        );
+        });
         try checkStatus(status);
         return status;
     } else {
-        const status = pg.SPI_execute(sql.ptr, options.read_only, options.limit);
+        const status = try err.wrap(pg.SPI_execute, .{ sql.ptr, options.read_only, options.limit });
         try checkStatus(status);
         return status;
     }
@@ -428,12 +429,31 @@ pub fn subtransaction(comptime f: anytype, args: anytype, options: Subtransactio
     if (errctx.pg_try()) {
         const result = @call(.auto, f, args);
         if (returns_error) {
-            if (result) |_| {} else |_| {
+            if (result) |_| {} else |e| {
                 // Leave the try block first: if the rollback itself raises,
                 // it must propagate to the outer handler, not back here.
                 errctx.pg_try_end();
+
+                // A wrapped Postgres call (`err.wrap`) turns a Postgres error
+                // into `PGErrorStack` and leaves the error data pending. Handle
+                // it like the error branch below: take a copy for the caller
+                // and clear the error state before rolling back.
+                var edata: ?*pg.ErrorData = null;
+                if (std.mem.eql(u8, @errorName(e), "PGErrorStack")) {
+                    _ = pg.MemoryContextSwitchTo(old_context);
+                    edata = pg.CopyErrorData();
+                    pg.FlushErrorState();
+                }
+
                 pg.RollbackAndReleaseCurrentSubTransaction();
                 restoreSubtransactionState(old_context, old_owner);
+                if (edata) |copy| {
+                    if (options.error_data) |out| {
+                        out.* = copy;
+                    } else {
+                        pg.FreeErrorData(copy);
+                    }
+                }
                 return result;
             }
         }
@@ -485,7 +505,7 @@ fn scanField(
     }
 
     const child_type = meta.pointerElemType(fieldType);
-    if (@typeInfo(child_type) == .@"struct") {
+    if (@typeInfo(child_type) == .@"struct" and !comptime datum.hasDirectConv(child_type)) {
         var struct_column = column;
         inline for (@typeInfo(child_type).@"struct".field_names) |field_name| {
             const child_ptr = &@field(to.*, field_name);
@@ -580,6 +600,18 @@ pub const Rows = struct {
             return err.PGError.SPIInvalidRowIndex;
         }
         try scanProcessedFrame(self.spi_frame, @intCast(self.row), values);
+    }
+
+    /// The current row as a borrowed `HeapTuple`, for reading columns by
+    /// number or name. It stays valid until `deinit` or `finish`; its
+    /// `deinit` is a no-op.
+    pub fn heapTuple(self: *Rows) err.PGError!heap_tuple.HeapTuple {
+        if (self.row < 0) {
+            return err.PGError.SPIInvalidRowIndex;
+        }
+        const table = self.spi_frame.tuptable orelse return err.PGError.SPIInvalidRowIndex;
+        const tupdesc = heap_tuple.TupleDesc.fromPg(table.*.tupdesc).?;
+        return heap_tuple.HeapTuple.fromPg(tupdesc, table.*.vals[@intCast(self.row)]).?;
     }
 };
 
@@ -753,6 +785,32 @@ pub const TestSuite_Spi = struct {
         try std.testing.expectEqual(@as(c_int, pg.ERRCODE_DIVISION_BY_ZERO), e.*.sqlerrcode);
 
         // The outer transaction is still usable.
+        try std.testing.expectEqual(@as(isize, 1), try exec("SELECT 1", .{}));
+    }
+
+    fn failingStatementWithArgs() !void {
+        _ = try exec("SELECT * FROM pgzx_no_such_table WHERE v = $1", .{
+            .args = .{
+                .types = &.{pg.INT4OID},
+                .values = &.{try datum.toNullableDatum(@as(i32, 1))},
+            },
+        });
+    }
+
+    /// `SPI_execute_with_args` raises through longjmp unless it is wrapped, which
+    /// skips the Zig frames (the arena for the arguments) and bypasses error
+    /// handling around the call.
+    pub fn testExecWithArgsReportsPgError() !void {
+        try connect();
+        defer finish();
+
+        var edata: ?*pg.ErrorData = null;
+        const result = subtransaction(failingStatementWithArgs, .{}, .{ .error_data = &edata });
+        try std.testing.expectError(error.PGErrorStack, result);
+        const e = edata orelse return error.TestUnexpectedResult;
+        defer pg.FreeErrorData(e);
+        try std.testing.expectEqual(@as(c_int, pg.ERRCODE_UNDEFINED_TABLE), e.*.sqlerrcode);
+
         try std.testing.expectEqual(@as(isize, 1), try exec("SELECT 1", .{}));
     }
 

@@ -4,9 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/xataio/pgzx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green" alt="License - Apache 2.0"></a>&nbsp;
-  <a href="https://github.com/xataio/pgzx/actions?query=branch%3Amain"><img src="https://github.com/xataio/pgzx/actions/workflows/check.yaml/badge.svg" alt="CI Build"></a> &nbsp;
-  <a href="https://xata.io/discord"><img src="https://img.shields.io/discord/996791218879086662?label=Discord" alt="Discord"></a> &nbsp;
-  <a href="https://twitter.com/xata"><img src="https://img.shields.io/twitter/follow/xata?style=flat" alt="X (formerly Twitter) Follow" /> </a>
+  <a href="https://github.com/xataio/pgzx/actions?query=branch%3Amain"><img src="https://github.com/barddoo/pgzx/actions/workflows/check.yaml/badge.svg" alt="CI Build"></a> &nbsp;
 </p>
 
 
@@ -24,15 +22,15 @@ In practice you still need to understand a lot of Postgres internals, and Postgr
 
 The following sample extensions (ordered from simple to complex) show how to use pgzx:
 
-| Extension                                  | Description |
-|--------------------------------------------|-------------|
-| [char_count_zig](examples/char_count_zig/) | Adds a function that counts how many times a particular character shows up in a string. Shows how to register a function and how to interpret the parameters. |
-| [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name. |
-| [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns. |
+| Extension                                  | Description                                                                                                                                                                             |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [char_count_zig](examples/char_count_zig/) | Adds a function that counts how many times a particular character shows up in a string. Shows how to register a function and how to interpret the parameters.                           |
+| [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name.                                                                                                                           |
+| [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns.                               |
 | [rational](examples/rational/)             | A `rational` base type with btree and hash operator classes. Shows the type system end to end: `pg_type`, operators, `pg_opclass`, casts and how they make indexes and `GROUP BY` work. |
-| [arrays](examples/arrays/)                 | Port of pgrx-examples/arrays. Postgres arrays as Zig slices (`[]const i32`, `[]const ?i32`, `text[]`), plus parameter defaults, `VARIADIC` and `pgzx.IntList`. |
-| [spi](examples/spi/)                       | Port of pgrx-examples/spi. Queries with arguments, a prepared plan kept for the session, cursors fetched in batches, subtransactions that skip failing rows, and `SECURITY DEFINER`. |
-| [file_io](examples/file_io/)               | Backend-safe file I/O through the virtual file descriptor layer (`pgzx.fd`), plus asynchronous VFD reads on PostgreSQL 18 (`pgzx.aio`). |
+| [arrays](examples/arrays/)                 | Port of pgrx-examples/arrays. Postgres arrays as Zig slices (`[]const i32`, `[]const ?i32`, `text[]`), plus parameter defaults, `VARIADIC` and `pgzx.IntList`.                          |
+| [spi](examples/spi/)                       | Port of pgrx-examples/spi. Queries with arguments, a prepared plan kept for the session, cursors fetched in batches, subtransactions that skip failing rows, and `SECURITY DEFINER`.    |
+| [file_io](examples/file_io/)               | Backend-safe file I/O through the virtual file descriptor layer (`pgzx.fd`), plus asynchronous VFD reads on PostgreSQL 18 (`pgzx.aio`).                                                 |
 
 ## Docs
 
@@ -153,16 +151,16 @@ _ = proj.addSteps(.{
 
 Per-function options:
 
-| Option       | Meaning                                                                 |
-| ------------ | ----------------------------------------------------------------------- |
-| `name`       | SQL function name (required).                                            |
-| `func`       | The Zig function (required).                                             |
+| Option       | Meaning                                                                   |
+| ------------ | ------------------------------------------------------------------------- |
+| `name`       | SQL function name (required).                                             |
+| `func`       | The Zig function (required).                                              |
 | `volatility` | `pgzx.ddl.Volatility`: `.@"volatile"` (default), `.stable`, `.immutable`. |
-| `strict`     | Emit `STRICT` (default `false`).                                         |
-| `parallel`   | `pgzx.ddl.Parallel`: `.unsafe`, `.restricted`, `.safe`.                  |
-| `args`       | Override argument SQL types, e.g. `&.{"text", "integer"}`.               |
-| `returns`    | Override the return SQL type.                                            |
-| `comment`    | Emit a `COMMENT ON FUNCTION`.                                            |
+| `strict`     | Emit `STRICT` (default `false`).                                          |
+| `parallel`   | `pgzx.ddl.Parallel`: `.unsafe`, `.restricted`, `.safe`.                   |
+| `args`       | Override argument SQL types, e.g. `&.{"text", "integer"}`.                |
+| `returns`    | Override the return SQL type.                                             |
+| `comment`    | Emit a `COMMENT ON FUNCTION`.                                             |
 
 Use `args`/`returns` for signatures with no direct SQL mapping, such as raw `pg.Datum` arguments. Keep `PG_FUNCTION_V1`/`PG_EXPORT` in `main.zig`, not in the schema module: the generator is linked as a standalone executable and cannot resolve Postgres server symbols. Objects that are not `CREATE FUNCTION` (types, operators, operator classes, casts) go in a source-level `catalog.sql`, which the generator appends after the functions. See `examples/rational` and `examples/sqlfns` for the complete pattern.
 

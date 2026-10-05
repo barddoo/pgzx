@@ -27,6 +27,9 @@ pub const KVHashTable = collections.htab.KVHashTable;
 
 pub const datum = @import("pgzx/datum.zig");
 
+pub const heap_tuple = @import("pgzx/heap_tuple.zig");
+pub const HeapTuple = heap_tuple.HeapTuple;
+
 pub const itemptr = @import("pgzx/itemptr.zig");
 
 pub const ddl = @import("pgzx/ddl.zig");
@@ -62,6 +65,8 @@ pub const utils = @import("pgzx/utils.zig");
 pub const xid = @import("pgzx/xid.zig");
 pub const intr = @import("pgzx/interrupts.zig");
 pub const testing = @import("pgzx/testing.zig");
+pub const tupdesc = @import("pgzx/tupdesc.zig");
+pub const TupleDesc = tupdesc.TupleDesc;
 
 // reexport the meta module. Although quite generic, it is useful to have these
 // helpers around at times.

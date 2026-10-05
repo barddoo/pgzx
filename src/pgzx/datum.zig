@@ -3,6 +3,7 @@ const std = @import("std");
 const pg = @import("pgzx_pgsys");
 
 const err = @import("err.zig");
+const heap_tuple = @import("heap_tuple.zig");
 const itemptr = @import("itemptr.zig");
 const mem = @import("mem.zig");
 const meta = @import("meta.zig");
@@ -150,6 +151,7 @@ var directMappings = .{
     .{ xid.Xid, XidConv },
     .{ xid.Cid, CidConv },
     .{ xid.Xid8, Xid8Conv },
+    .{ heap_tuple.HeapTuple, heap_tuple.HeapTupleConv },
     .{ Uuid, UuidConv },
     .{ Bytea, ByteaConv },
     .{ Date, DateConv },
@@ -158,6 +160,19 @@ var directMappings = .{
     .{ TimestampTz, TimestampTzConv },
     .{ pg.Interval, IntervalConv },
 };
+
+/// Whether `T` has a dedicated converter, as opposed to being converted by
+/// reflection on its shape. Structs with one are a single column, not a group
+/// of columns, when scanning SPI rows.
+pub fn hasDirectConv(comptime T: type) bool {
+    comptime {
+        if (isConv(T)) return true;
+        for (directMappings) |e| {
+            if (e[0] == T) return true;
+        }
+        return false;
+    }
+}
 
 pub fn findConv(comptime T: type) type {
     if (isConv(T)) { // is T already a converter?
@@ -269,7 +284,7 @@ pub const Tid = Conv(struct {
 
     pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
         _ = oid;
-        const src = pg.DatumGetItemPointer(d);
+        const src: pg.ItemPointer = @ptrFromInt(d);
         var tid: Type = .{};
         itemptr.itemPointerSetAll(
             &tid,
@@ -285,7 +300,7 @@ pub const Tid = Conv(struct {
             itemptr.itemPointerGetBlockNumberNoCheck(v),
             itemptr.itemPointerGetOffsetNumberNoCheck(v),
         );
-        return pg.ItemPointerGetDatum(tid);
+        return @intFromPtr(tid);
     }
 });
 
@@ -348,7 +363,7 @@ const UuidConv = Conv(struct {
         _ = oid;
         const p = try mem.PGCurrentContextAllocator.create(Uuid);
         p.* = v;
-        return pg.PointerGetDatum(@ptrCast(p));
+        return @intFromPtr(p);
     }
 });
 
@@ -380,7 +395,7 @@ const ByteaConv = Conv(struct {
         const buf = try mem.PGCurrentContextAllocator.alloc(u8, total);
         varatt.SET_VARSIZE(buf.ptr, total);
         @memcpy(buf[hdr..], v.bytes);
-        return pg.PointerGetDatum(@ptrCast(buf.ptr));
+        return @intFromPtr(buf.ptr);
     }
 });
 
@@ -480,7 +495,7 @@ const IntervalConv = Conv(struct {
         _ = oid;
         const p = try mem.PGCurrentContextAllocator.create(pg.Interval);
         p.* = v;
-        return pg.IntervalPGetDatum(@ptrCast(p));
+        return @intFromPtr(p);
     }
 });
 

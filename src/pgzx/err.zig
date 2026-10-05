@@ -21,6 +21,11 @@ pub const PGError = error{
     StringLengthMismatch,
     UnexpectedArrayElementType,
 
+    // Heap tuple and tuple descriptor errors
+    NoSuchAttribute,
+    IncorrectAttributeCount,
+    NotACompositeType,
+
     // SPI
     SPIError,
     SPIConnectFailed,

@@ -74,7 +74,7 @@ pub fn PgBox(comptime T: type) type {
 
         /// Release ownership and return the pointer as a `Datum`.
         pub fn intoDatum(self: *Self) pg.Datum {
-            return pg.PointerGetDatum(@ptrCast(self.intoPg()));
+            return @intFromPtr(self.intoPg());
         }
 
         /// Free the value if the box owns it. Borrowed boxes are left alone.
@@ -187,7 +187,7 @@ pub const TestSuite_PgBox = struct {
         const d = box.intoDatum();
         try testing.expect(!box.isOwned());
 
-        const raw: *State = @ptrCast(@alignCast(pg.DatumGetPointer(d)));
+        const raw: *State = @ptrFromInt(d);
         try testing.expectEqual(@as(u64, 11), raw.count);
         pg.pfree(raw);
     }
