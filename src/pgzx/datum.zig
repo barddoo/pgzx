@@ -3,6 +3,7 @@ const std = @import("std");
 const pg = @import("pgzx_pgsys");
 
 const err = @import("err.zig");
+const itemptr = @import("itemptr.zig");
 const mem = @import("mem.zig");
 const meta = @import("meta.zig");
 const varatt = @import("varatt.zig");
@@ -144,6 +145,7 @@ pub fn OptConv(comptime C: anytype) type {
 /// reflection only.
 var directMappings = .{
     .{ pg.Datum, PGDatum },
+    .{ pg.ItemPointerData, Tid },
 };
 
 pub fn findConv(comptime T: type) type {
@@ -247,6 +249,35 @@ pub const Float32 = SimpleConv(f32, scalar.getFloat4, scalar.putFloat4, "real");
 pub const Float64 = SimpleConv(f64, scalar.getFloat8, scalar.putFloat8, "double precision");
 pub const PGDatum = SimpleConv(pg.Datum, idDatum, idDatum, null);
 
+/// Converter for PostgreSQL's `tid` type, mapped to the raw
+/// `pg.ItemPointerData` struct so it stays bit-compatible with the C layout.
+/// Helpers for reading/writing it live in `itemptr.zig`.
+pub const Tid = Conv(struct {
+    pub const Type = pg.ItemPointerData;
+    pub const sql_name = "tid";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        const src = pg.DatumGetItemPointer(d);
+        var tid: Type = .{};
+        itemptr.itemPointerSetAll(
+            &tid,
+            itemptr.itemPointerGetBlockNumber(src),
+            itemptr.itemPointerGetOffsetNumber(src),
+        );
+        return tid;
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const tid = try itemptr.newItemPointer(
+            itemptr.itemPointerGetBlockNumberNoCheck(v),
+            itemptr.itemPointerGetOffsetNumberNoCheck(v),
+        );
+        return pg.ItemPointerGetDatum(tid);
+    }
+});
+
 pub const SliceU8Z = Conv(struct {
     pub const Type = [:0]const u8;
     pub const sql_name = "text";
@@ -272,6 +303,7 @@ pub fn typeOid(comptime T: type) pg.Oid {
         f32 => pg.FLOAT4OID,
         f64 => pg.FLOAT8OID,
         []const u8, [:0]const u8 => pg.TEXTOID,
+        pg.ItemPointerData => pg.TIDOID,
         else => @compileError("pgzx.datum: no type OID for Zig type " ++ @typeName(T)),
     };
 }
@@ -769,5 +801,49 @@ pub const TestSuite_Datum = struct {
     pub fn testOptionalNull() !void {
         const d = try toNullableDatum(@as(?i32, null));
         try std.testing.expectEqual(true, d.isnull);
+    }
+
+    pub fn testTidRoundTrip() !void {
+        var original: pg.ItemPointerData = .{};
+        itemptr.itemPointerSetAll(&original, 42, 7);
+
+        const d = try toNullableDatum(original);
+        try std.testing.expectEqual(false, d.isnull);
+
+        const decoded = try fromNullableDatum(pg.ItemPointerData, d);
+        try std.testing.expectEqual(@as(pg.BlockNumber, 42), itemptr.itemPointerGetBlockNumberNoCheck(decoded));
+        try std.testing.expectEqual(@as(pg.OffsetNumber, 7), itemptr.itemPointerGetOffsetNumberNoCheck(decoded));
+    }
+
+    /// Checks the Zig `tid` conversions against the server's own representation.
+    pub fn testTidMatchesServer() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        // server -> Zig
+        {
+            var rows = try spi.query("SELECT '(3,42)'::tid", .{ .read_only = true });
+            defer rows.deinit();
+            try std.testing.expect(rows.next());
+            var raw: [1]pg.Datum = undefined;
+            try rows.scan(.{&raw[0]});
+            const tid = try fromDatum(pg.ItemPointerData, raw[0], false);
+            try std.testing.expectEqual(@as(pg.BlockNumber, 3), itemptr.itemPointerGetBlockNumberNoCheck(tid));
+            try std.testing.expectEqual(@as(pg.OffsetNumber, 42), itemptr.itemPointerGetOffsetNumberNoCheck(tid));
+        }
+
+        // Zig -> server
+        var tid: pg.ItemPointerData = .{};
+        itemptr.itemPointerSetAll(&tid, 3, 42);
+        var rows = try spi.queryTyped(bool, "SELECT $1 = '(3,42)'::tid", .{
+            .read_only = true,
+            .args = .{
+                .types = &.{pg.TIDOID},
+                .values = &.{try toNullableDatum(tid)},
+            },
+        });
+        defer rows.deinit();
+        try std.testing.expectEqual(true, (try rows.next()).?);
     }
 };

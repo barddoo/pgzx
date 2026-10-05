@@ -19,6 +19,7 @@ comptime {
             pgzx.elog.TestSuite_Elog,
             pgzx.fd.TestSuite_Fd,
             pgzx.intr.TestSuite_Interrupts,
+            pgzx.itemptr.TestSuite_Itemptr,
             pgzx.lwlock.TestSuite_LWLock,
             pgzx.meta.TestSuite_Meta,
             pgzx.mem.TestSuite_Mem,

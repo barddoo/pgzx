@@ -26,6 +26,8 @@ pub const KVHashTable = collections.htab.KVHashTable;
 
 pub const datum = @import("pgzx/datum.zig");
 
+pub const itemptr = @import("pgzx/itemptr.zig");
+
 pub const ddl = @import("pgzx/ddl.zig");
 
 pub const elog = @import("pgzx/elog.zig");
