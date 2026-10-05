@@ -146,6 +146,13 @@ pub fn OptConv(comptime C: anytype) type {
 var directMappings = .{
     .{ pg.Datum, PGDatum },
     .{ pg.ItemPointerData, Tid },
+    .{ Uuid, UuidConv },
+    .{ Bytea, ByteaConv },
+    .{ Date, DateConv },
+    .{ Time, TimeConv },
+    .{ Timestamp, TimestampConv },
+    .{ TimestampTz, TimestampTzConv },
+    .{ pg.Interval, IntervalConv },
 };
 
 pub fn findConv(comptime T: type) type {
@@ -278,6 +285,171 @@ pub const Tid = Conv(struct {
     }
 });
 
+// ---------------------------------------------------------------------------
+// Built-in non-scalar types: uuid, bytea and the date/time family.
+//
+// The value types mirror PostgreSQL's on-the-wire units rather than a calendar
+// API: `Date` is days since 2000-01-01, `Time` is microseconds since midnight
+// and `Timestamp`/`TimestampTz` are microseconds since 2000-01-01 (PostgreSQL's
+// epoch, not the Unix one). Calendar helpers can be layered on top later.
+// ---------------------------------------------------------------------------
+
+/// `uuid`, stored as the server's 16 raw bytes (bit-compatible with
+/// `pg_uuid_t`).
+pub const Uuid = extern struct {
+    data: [16]u8,
+};
+
+const UuidConv = Conv(struct {
+    pub const Type = Uuid;
+    pub const sql_name = "uuid";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        const src: *const Uuid = @ptrFromInt(d);
+        return src.*;
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const p = try mem.PGCurrentContextAllocator.create(Uuid);
+        p.* = v;
+        return pg.PointerGetDatum(@ptrCast(p));
+    }
+});
+
+/// `bytea`, mapped to a borrowed byte slice. Distinct from `[]const u8` (which
+/// is `text`) so the SQL type is explicit.
+pub const Bytea = struct {
+    bytes: []const u8,
+};
+
+const ByteaConv = Conv(struct {
+    pub const Type = Bytea;
+    pub const sql_name = "bytea";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        // `DatumGetByteaPP` already detoasts, so `ptr` is a plain in-line
+        // varlena; read the payload straight out of it.
+        const ptr = pg.DatumGetByteaPP(d);
+        const len = varatt.VARSIZE_ANY_EXHDR(ptr);
+        const buf = try mem.PGCurrentContextAllocator.alloc(u8, len);
+        @memcpy(buf, varatt.VARDATA_ANY(ptr)[0..len]);
+        return .{ .bytes = buf };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const hdr: usize = @intCast(varatt.VARHDRSZ);
+        const total = hdr + v.bytes.len;
+        const buf = try mem.PGCurrentContextAllocator.alloc(u8, total);
+        varatt.SET_VARSIZE(buf.ptr, total);
+        @memcpy(buf[hdr..], v.bytes);
+        return pg.PointerGetDatum(@ptrCast(buf.ptr));
+    }
+});
+
+/// `date`: days since 2000-01-01.
+pub const Date = struct {
+    days: i32,
+};
+
+const DateConv = Conv(struct {
+    pub const Type = Date;
+    pub const sql_name = "date";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .days = scalar.get(i32)(d) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        return scalar.put(i32)(v.days);
+    }
+});
+
+/// `time`: microseconds since midnight.
+pub const Time = struct {
+    micros: i64,
+};
+
+const TimeConv = Conv(struct {
+    pub const Type = Time;
+    pub const sql_name = "time";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .micros = scalar.get(i64)(d) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        return scalar.put(i64)(v.micros);
+    }
+});
+
+/// `timestamp`: microseconds since 2000-01-01.
+pub const Timestamp = struct {
+    micros: i64,
+};
+
+const TimestampConv = Conv(struct {
+    pub const Type = Timestamp;
+    pub const sql_name = "timestamp";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .micros = scalar.get(i64)(d) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        return scalar.put(i64)(v.micros);
+    }
+});
+
+/// `timestamp with time zone`: microseconds since 2000-01-01, UTC.
+pub const TimestampTz = struct {
+    micros: i64,
+};
+
+const TimestampTzConv = Conv(struct {
+    pub const Type = TimestampTz;
+    pub const sql_name = "timestamp with time zone";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .micros = scalar.get(i64)(d) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        return scalar.put(i64)(v.micros);
+    }
+});
+
+/// `interval`: PostgreSQL's 16-byte struct (`time` usec, `day`, `month`).
+pub const Interval = pg.Interval;
+
+const IntervalConv = Conv(struct {
+    pub const Type = Interval;
+    pub const sql_name = "interval";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return pg.DatumGetIntervalP(d).*;
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const p = try mem.PGCurrentContextAllocator.create(pg.Interval);
+        p.* = v;
+        return pg.IntervalPGetDatum(@ptrCast(p));
+    }
+});
+
 pub const SliceU8Z = Conv(struct {
     pub const Type = [:0]const u8;
     pub const sql_name = "text";
@@ -304,6 +476,13 @@ pub fn typeOid(comptime T: type) pg.Oid {
         f64 => pg.FLOAT8OID,
         []const u8, [:0]const u8 => pg.TEXTOID,
         pg.ItemPointerData => pg.TIDOID,
+        Uuid => pg.UUIDOID,
+        Bytea => pg.BYTEAOID,
+        Date => pg.DATEOID,
+        Time => pg.TIMEOID,
+        Timestamp => pg.TIMESTAMPOID,
+        TimestampTz => pg.TIMESTAMPTZOID,
+        pg.Interval => pg.INTERVALOID,
         else => @compileError("pgzx.datum: no type OID for Zig type " ++ @typeName(T)),
     };
 }
@@ -565,20 +744,6 @@ const scalar = struct {
     }
 };
 
-pub fn getDatumStringLike(datum: pg.Datum, oid: pg.Oid) ![]const u8 {
-    return getDatumStringLikeZ(datum, oid);
-}
-
-/// Convert a datum to a TEXT slice. This function detoast the datum if necessary.
-/// All allocations will be performed in the Current Memory Context.
-pub fn getDatumTextSlice(datum: pg.Datum, oid: pg.Oid) ![]const u8 {
-    return getDatumTextSliceZ(datum, oid);
-}
-
-pub inline fn getDatumCString(datum: pg.Datum) ![]const u8 {
-    return getDatumCStringZ(datum);
-}
-
 pub fn getDatumStringLikeZ(datum: pg.Datum, oid: pg.Oid) ![:0]const u8 {
     return if (useStringPointer(oid)) getDatumCStringZ(datum) else getDatumTextSliceZ(datum);
 }
@@ -591,16 +756,13 @@ pub inline fn getDatumCStringZ(datum: pg.Datum) ![:0]const u8 {
 /// All allocations will be performed in the Current Memory Context.
 ///
 pub fn getDatumTextSliceZ(datum: pg.Datum) ![:0]const u8 {
+    // `DatumGetTextPP` already detoasts, so no further `pg_detoast_datum_packed`.
     const ptr = pg.DatumGetTextPP(datum);
 
-    const unpacked = try err.wrap(pg.pg_detoast_datum_packed, .{ptr});
-    const len = varatt.VARSIZE_ANY_EXHDR(unpacked);
+    const len = varatt.VARSIZE_ANY_EXHDR(ptr);
     var buffer = try mem.PGCurrentContextAllocator.alloc(u8, len + 1);
-    std.mem.copyForwards(u8, buffer, varatt.VARDATA_ANY(unpacked)[0..len]);
+    std.mem.copyForwards(u8, buffer, varatt.VARDATA_ANY(ptr)[0..len]);
     buffer[len] = 0;
-    if (unpacked != ptr) {
-        pg.pfree(unpacked);
-    }
     return buffer[0..len :0];
 }
 
@@ -704,8 +866,9 @@ pub const TestSuite_Datum = struct {
         try std.testing.expectEqualSlices(f64, &values, view.items);
 
         // items points into the array value itself, not into a copy.
-        const start = @intFromPtr(pg.DatumGetPointer(d.value));
-        const end = start + varatt.VARSIZE(pg.DatumGetPointer(d.value));
+        const array_ptr = pg.DatumGetPointer(d.value);
+        const start = @intFromPtr(array_ptr);
+        const end = start + varatt.VARSIZE(array_ptr);
         const at = @intFromPtr(view.items.ptr);
         try std.testing.expect(at > start and at + view.items.len * @sizeOf(f64) <= end);
     }
@@ -843,6 +1006,112 @@ pub const TestSuite_Datum = struct {
                 .values = &.{try toNullableDatum(tid)},
             },
         });
+        defer rows.deinit();
+        try std.testing.expectEqual(true, (try rows.next()).?);
+    }
+
+    pub fn testUuidRoundTrip() !void {
+        const v = Uuid{ .data = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 } };
+        const back = try fromNullableDatum(Uuid, try toNullableDatum(v));
+        try std.testing.expectEqualSlices(u8, &v.data, &back.data);
+    }
+
+    pub fn testByteaRoundTrip() !void {
+        const v = Bytea{ .bytes = &.{ 0, 1, 2, 255 } };
+        const back = try fromNullableDatum(Bytea, try toNullableDatum(v));
+        try std.testing.expectEqualSlices(u8, v.bytes, back.bytes);
+    }
+
+    pub fn testDateRoundTrip() !void {
+        const back = try fromNullableDatum(Date, try toNullableDatum(Date{ .days = -3 }));
+        try std.testing.expectEqual(@as(i32, -3), back.days);
+    }
+
+    pub fn testTimeRoundTrip() !void {
+        const back = try fromNullableDatum(Time, try toNullableDatum(Time{ .micros = 3_600_000_000 }));
+        try std.testing.expectEqual(@as(i64, 3_600_000_000), back.micros);
+    }
+
+    pub fn testTimestampRoundTrip() !void {
+        const back = try fromNullableDatum(Timestamp, try toNullableDatum(Timestamp{ .micros = -1 }));
+        try std.testing.expectEqual(@as(i64, -1), back.micros);
+    }
+
+    pub fn testTimestampTzRoundTrip() !void {
+        const back = try fromNullableDatum(TimestampTz, try toNullableDatum(TimestampTz{ .micros = 1_000_000 }));
+        try std.testing.expectEqual(@as(i64, 1_000_000), back.micros);
+    }
+
+    pub fn testIntervalRoundTrip() !void {
+        const v = Interval{ .month = 1, .day = 2, .time = 3_000_000 };
+        const back = try fromNullableDatum(Interval, try toNullableDatum(v));
+        try std.testing.expectEqual(@as(i32, 1), back.month);
+        try std.testing.expectEqual(@as(i32, 2), back.day);
+        try std.testing.expectEqual(@as(i64, 3_000_000), back.time);
+    }
+
+    /// Checks the uuid/bytea/date-time conversions against the server's own
+    /// representation, in both directions.
+    pub fn testBuiltinTypesMatchServer() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        // server -> Zig
+        {
+            var rows = try spi.query(
+                "SELECT '2000-01-02'::date, '00:00:00.000001'::time, " ++
+                    "'2000-01-01 00:00:00.000001'::timestamp, " ++
+                    "'2000-01-01 00:00:00.000001+00'::timestamptz, " ++
+                    "'1 mon 2 days 3 secs'::interval, " ++
+                    "'00000000-0000-0000-0000-000000000001'::uuid, " ++
+                    "'\\x010203'::bytea",
+                .{ .read_only = true },
+            );
+            defer rows.deinit();
+            try std.testing.expect(rows.next());
+            var raw: [7]pg.Datum = undefined;
+            try rows.scan(.{ &raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &raw[5], &raw[6] });
+
+            try std.testing.expectEqual(@as(i32, 1), (try fromDatum(Date, raw[0], false)).days);
+            try std.testing.expectEqual(@as(i64, 1), (try fromDatum(Time, raw[1], false)).micros);
+            try std.testing.expectEqual(@as(i64, 1), (try fromDatum(Timestamp, raw[2], false)).micros);
+            try std.testing.expectEqual(@as(i64, 1), (try fromDatum(TimestampTz, raw[3], false)).micros);
+
+            const iv = try fromDatum(Interval, raw[4], false);
+            try std.testing.expectEqual(@as(i32, 1), iv.month);
+            try std.testing.expectEqual(@as(i32, 2), iv.day);
+            try std.testing.expectEqual(@as(i64, 3_000_000), iv.time);
+
+            const uuid = try fromDatum(Uuid, raw[5], false);
+            try std.testing.expectEqual(@as(u8, 1), uuid.data[15]);
+
+            const bytes = try fromDatum(Bytea, raw[6], false);
+            try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, bytes.bytes);
+        }
+
+        // Zig -> server
+        var rows = try spi.queryTyped(
+            bool,
+            "SELECT $1 = '2000-01-02'::date AND $2 = '00:00:00.000001'::time " ++
+                "AND $3 = '2000-01-01 00:00:00.000001'::timestamp " ++
+                "AND $4 = '00000000-0000-0000-0000-000000000001'::uuid " ++
+                "AND $5 = '\\x010203'::bytea AND $6 = '1 mon 2 days 3 secs'::interval",
+            .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{ pg.DATEOID, pg.TIMEOID, pg.TIMESTAMPOID, pg.UUIDOID, pg.BYTEAOID, pg.INTERVALOID },
+                    .values = &.{
+                        try toNullableDatum(Date{ .days = 1 }),
+                        try toNullableDatum(Time{ .micros = 1 }),
+                        try toNullableDatum(Timestamp{ .micros = 1 }),
+                        try toNullableDatum(Uuid{ .data = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 } }),
+                        try toNullableDatum(Bytea{ .bytes = &.{ 1, 2, 3 } }),
+                        try toNullableDatum(Interval{ .month = 1, .day = 2, .time = 3_000_000 }),
+                    },
+                },
+            },
+        );
         defer rows.deinit();
         try std.testing.expectEqual(true, (try rows.next()).?);
     }

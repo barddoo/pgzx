@@ -2,6 +2,7 @@
 //! compile correctly.
 
 const pg = @import("pgzx_pgsys");
+const std = @import("std");
 
 // WARNING:
 // Taken from translated C code and mostly untested.
@@ -22,10 +23,30 @@ pub const VARTAG_EXPANDED_RW = pg.VARTAG_EXPANDED_RW;
 pub const VARTAG_INDIRECT = pg.VARTAG_INDIRECT;
 pub const VARTAG_ONDISK = pg.VARTAG_ONDISK;
 
-pub const SET_VARSIZE_4B = pg.SET_VARSIZE_4B;
-pub const SET_VARSIZE_1B = pg.SET_VARSIZE_1B;
-pub const SET_VARSIZE_4B_C = pg.SET_VARSIZE_4B_C;
-pub const SET_VARTAG_1B_E = pg.SET_VARTAG_1B_E;
+// The C `SET_VARSIZE_*` macros assign to a struct member, which translate-c
+// cannot translate (they become `@compileError` on PG18). Provide Zig
+// equivalents with the same header layout:
+//   4-byte header:  va_header = len << 2                (low 2 bits 00)
+//   compressed 4B:  va_header = (len << 2) | 0x02
+//   1-byte (short): va_header = (len << 1) | 0x01
+//   external 1B:    va_header = 0x01, va_tag = tag
+pub inline fn SET_VARSIZE_4B(PTR: anytype, len: anytype) void {
+    @as([*c]varattrib_4b, @ptrCast(@alignCast(PTR))).*.va_4byte.va_header = @as(u32, @intCast(len)) << 2;
+}
+
+pub inline fn SET_VARSIZE_4B_C(PTR: anytype, len: anytype) void {
+    @as([*c]varattrib_4b, @ptrCast(@alignCast(PTR))).*.va_4byte.va_header = (@as(u32, @intCast(len)) << 2) | @as(u32, 0x02);
+}
+
+pub inline fn SET_VARSIZE_1B(PTR: anytype, len: anytype) void {
+    @as([*c]varattrib_1b, @ptrCast(@alignCast(PTR))).*.va_header = (@as(u8, @intCast(len)) << 1) | @as(u8, 0x01);
+}
+
+pub inline fn SET_VARTAG_1B_E(PTR: anytype, tag: anytype) void {
+    const p = @as([*c]varattrib_1b_e, @ptrCast(@alignCast(PTR)));
+    p.*.va_header = 0x01;
+    p.*.va_tag = @intCast(tag);
+}
 
 pub const varatt_indirect = pg.varatt_indirect;
 pub const varatt_expanded = pg.varatt_expanded;
@@ -35,9 +56,6 @@ pub const varattrib_4b = pg.varattrib_4b;
 pub const varattrib_1b_e = pg.varattrib_1b_e;
 
 pub const VARLENA_EXTSIZE_MASK = (@as(c_uint, 1) << VARLENA_EXTSIZE_BITS) - @as(c_int, 1);
-
-pub const @"true" = @as(c_int, 1);
-pub const @"false" = @as(c_int, 0);
 
 pub inline fn VARTAG_IS_EXPANDED(tag: anytype) @TypeOf((tag & ~@as(c_int, 1)) == VARTAG_EXPANDED_RO) {
     return (tag & ~@as(c_int, 1)) == VARTAG_EXPANDED_RO;
@@ -234,3 +252,37 @@ pub inline fn VARATT_EXTERNAL_GET_COMPRESS_METHOD(toast_pointer: anytype) @TypeO
 pub inline fn VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer: anytype) @TypeOf(VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer) < (toast_pointer.va_rawsize - VARHDRSZ)) {
     return VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer) < (toast_pointer.va_rawsize - VARHDRSZ);
 }
+
+/// Exercises the `SET_VARSIZE_*` implementations against the `VARSIZE_*` /
+/// `VARATT_IS_*` readers. Pure Zig; operates on a stack buffer.
+pub const TestSuite_Varatt = struct {
+    pub fn testSetVarsize4B() !void {
+        var buf: [16]u8 align(8) = undefined;
+        SET_VARSIZE(&buf, 8);
+        try std.testing.expect(VARATT_IS_4B_U(&buf));
+        try std.testing.expectEqual(@as(u32, 8), VARSIZE(&buf));
+        try std.testing.expectEqual(@as(usize, 4), VARSIZE_ANY_EXHDR(&buf));
+    }
+
+    pub fn testSetVarsizeShort() !void {
+        var buf: [16]u8 align(8) = undefined;
+        SET_VARSIZE_SHORT(&buf, 5);
+        try std.testing.expect(VARATT_IS_1B(&buf));
+        try std.testing.expectEqual(@as(u32, 5), VARSIZE_SHORT(&buf));
+        try std.testing.expectEqual(@as(usize, 4), VARSIZE_ANY_EXHDR(&buf));
+    }
+
+    pub fn testSetVarsizeCompressed() !void {
+        var buf: [16]u8 align(8) = undefined;
+        SET_VARSIZE_COMPRESSED(&buf, 8);
+        try std.testing.expect(VARATT_IS_COMPRESSED(&buf));
+        try std.testing.expectEqual(@as(u32, 8), VARSIZE(&buf));
+    }
+
+    pub fn testSetVartagExternal() !void {
+        var buf: [16]u8 align(8) = undefined;
+        SET_VARTAG_EXTERNAL(&buf, VARTAG_ONDISK);
+        try std.testing.expect(VARATT_IS_EXTERNAL(&buf));
+        try std.testing.expectEqual(@as(u8, @intCast(VARTAG_ONDISK)), VARTAG_EXTERNAL(&buf));
+    }
+};

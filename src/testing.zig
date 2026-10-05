@@ -1,4 +1,5 @@
 const pgzx = @import("pgzx.zig");
+const varatt = @import("pgzx/varatt.zig");
 
 comptime {
     pgzx.PG_MODULE_MAGIC();
@@ -28,6 +29,7 @@ comptime {
             pgzx.spi.TestSuite_Spi,
             pgzx.str.TestSuite_Str,
             pgzx.guc.TestSuite_Guc,
+            varatt.TestSuite_Varatt,
         },
     );
 }

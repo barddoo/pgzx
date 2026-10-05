@@ -122,8 +122,8 @@ pub const TestSuite_Interrupts = struct {
     }
 
     pub fn testPendingRead() !void {
-        // Reading pending signal flags is side-effect free.
-        _ = Pending.Interrupt.read();
-        _ = Pending.QueryCancel.read();
+        // Reading pending signal flags is side-effect free, so two reads agree.
+        try std.testing.expectEqual(Pending.Interrupt.read(), Pending.Interrupt.read());
+        try std.testing.expectEqual(Pending.QueryCancel.read(), Pending.QueryCancel.read());
     }
 };
