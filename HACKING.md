@@ -9,21 +9,31 @@ pgzx extension on your machine. It assumes you have cloned this repository.
 
 ## Table of contents
 
-- [1. Prerequisites](#1-prerequisites)
-- [2. Enter the development shell](#2-enter-the-development-shell)
-- [3. Create the local PostgreSQL installation](#3-create-the-local-postgresql-installation)
-- [4. Repository layout](#4-repository-layout)
-- [5. Environment variables](#5-environment-variables)
-- [6. Build an example extension](#6-build-an-example-extension)
-- [7. Use it from SQL](#7-use-it-from-sql)
-- [8. The build helper (`PGBuild`)](#8-the-build-helper-pgbuild)
-- [9. Write extension code](#9-write-extension-code)
-- [10. Tests](#10-tests)
-- [11. Create a new extension project](#11-create-a-new-extension-project)
-- [12. Switch PostgreSQL versions](#12-switch-postgresql-versions)
-- [13. Debugging](#13-debugging)
-- [14. CI](#14-ci)
-- [15. Troubleshooting](#15-troubleshooting)
+- [HACKING: local development guide](#hacking-local-development-guide)
+  - [Table of contents](#table-of-contents)
+  - [1. Prerequisites](#1-prerequisites)
+  - [2. Enter the development shell](#2-enter-the-development-shell)
+  - [3. Create the local PostgreSQL installation](#3-create-the-local-postgresql-installation)
+  - [4. Repository layout](#4-repository-layout)
+  - [5. Environment variables](#5-environment-variables)
+  - [6. Build an example extension](#6-build-an-example-extension)
+  - [7. Use it from SQL](#7-use-it-from-sql)
+  - [8. The build helper (`PGBuild`)](#8-the-build-helper-pgbuild)
+  - [9. Write extension code](#9-write-extension-code)
+  - [10. Tests](#10-tests)
+    - [`pg_regress` (SQL regression tests)](#pg_regress-sql-regression-tests)
+    - [In-server unit tests](#in-server-unit-tests)
+    - [Pure-Zig tests (no server)](#pure-zig-tests-no-server)
+  - [11. Create a new extension project](#11-create-a-new-extension-project)
+  - [12. Switch PostgreSQL versions](#12-switch-postgresql-versions)
+  - [13. Debugging](#13-debugging)
+    - [In-server unit tests](#in-server-unit-tests-1)
+    - [VS Code](#vs-code)
+    - [Editor setup (ZLS)](#editor-setup-zls)
+    - [PostgreSQL debug build](#postgresql-debug-build)
+    - [Zig standard library / compiler](#zig-standard-library--compiler)
+  - [14. CI](#14-ci)
+  - [15. Troubleshooting](#15-troubleshooting)
 
 ## 1. Prerequisites
 
@@ -65,14 +75,14 @@ nix develop '.#debug'
 
 On shell entry you get a menu of the helper commands:
 
-| Command | Purpose |
-| --- | --- |
-| `pguse <15\|16\|17\|18\|local>` | Select the PostgreSQL version to use |
-| `pglocal` | Relocate a PostgreSQL install into `out/<version>` |
-| `pginit` | Initialize the local cluster and database |
-| `pgstart` / `pgstop` / `pgstatus` | Control the local server |
-| `menu` | Show the command list |
-| `root` (alias) | `cd` back to the project root |
+| Command                           | Purpose                                            |
+| --------------------------------- | -------------------------------------------------- |
+| `pguse <15\|16\|17\|18\|local>`   | Select the PostgreSQL version to use               |
+| `pglocal`                         | Relocate a PostgreSQL install into `out/<version>` |
+| `pginit`                          | Initialize the local cluster and database          |
+| `pgstart` / `pgstop` / `pgstatus` | Control the local server                           |
+| `menu`                            | Show the command list                              |
+| `root` (alias)                    | `cd` back to the project root                      |
 
 ## 3. Create the local PostgreSQL installation
 
@@ -129,15 +139,15 @@ Every directory under `examples/` is a self-contained Zig package with its own
 
 The development shell sets these for you:
 
-| Variable | Value | Meaning |
-| --- | --- | --- |
-| `PRJ_ROOT` | project root | used by the helper scripts |
-| `PG_HOME` | `$PRJ_ROOT/out/default` | the relocated install in use |
-| `PGHOST` | `$PG_HOME/run` | Unix socket directory for clients |
-| `NIX_PGLIBDIR` | `$PG_HOME/lib` | where the Nix PostgreSQL looks for modules |
-| `PGZX_C_INCLUDE_DIRS` | store paths | extra C headers for the header translation |
-| `ZIG_LOCAL_CACHE_DIR` | `~/.cache/zig-pgzx` | shared Zig cache for the whole repo |
-| `PG_VERSION` | optional | overrides the `pg_config` dispatcher version |
+| Variable              | Value                   | Meaning                                      |
+| --------------------- | ----------------------- | -------------------------------------------- |
+| `PRJ_ROOT`            | project root            | used by the helper scripts                   |
+| `PG_HOME`             | `$PRJ_ROOT/out/default` | the relocated install in use                 |
+| `PGHOST`              | `$PG_HOME/run`          | Unix socket directory for clients            |
+| `NIX_PGLIBDIR`        | `$PG_HOME/lib`          | where the Nix PostgreSQL looks for modules   |
+| `PGZX_C_INCLUDE_DIRS` | store paths             | extra C headers for the header translation   |
+| `ZIG_LOCAL_CACHE_DIR` | `~/.cache/zig-pgzx`     | shared Zig cache for the whole repo          |
+| `PG_VERSION`          | optional                | overrides the `pg_config` dispatcher version |
 
 `pg_config` in the shell is a dispatcher: it picks the version from
 `$PG_VERSION`, else `out/.pgversion`, else PostgreSQL 16.
@@ -443,14 +453,14 @@ tests, regression tests, drop). It prints `Success!` on success.
 
 ## 15. Troubleshooting
 
-| Symptom | Cause / fix |
-| --- | --- |
-| `failed to spawn .../pg_regress: FileNotFound` | `pg_config --pkglibdir` does not contain the pgxs tooling; the build now derives `pg_regress` from `pg_config --pgxs` |
-| `could not access file "foo_unit"` | the unit library was not installed into the server libdir; run `zig build -p "$PG_HOME" unit` |
-| `SET` outside the valid range instead of clamping | core validates `min/max` *before* check hooks; widen the bounds |
-| `server closed the connection unexpectedly` | a crash (e.g. a NULL value address); check `out/default/var/postgres/log/server.log` |
-| `(unknown)` for pgzx imports in the editor | ZLS is missing the dev-shell environment; see [Editor setup](#editor-setup-zls) |
-| stale weird errors after `pguse` | `rm -rf .zig-cache` in the package and rebuild |
+| Symptom                                           | Cause / fix                                                                                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `failed to spawn .../pg_regress: FileNotFound`    | `pg_config --pkglibdir` does not contain the pgxs tooling; the build now derives `pg_regress` from `pg_config --pgxs` |
+| `could not access file "foo_unit"`                | the unit library was not installed into the server libdir; run `zig build -p "$PG_HOME" unit`                         |
+| `SET` outside the valid range instead of clamping | core validates `min/max` *before* check hooks; widen the bounds                                                       |
+| `server closed the connection unexpectedly`       | a crash (e.g. a NULL value address); check `out/default/var/postgres/log/server.log`                                  |
+| `(unknown)` for pgzx imports in the editor        | ZLS is missing the dev-shell environment; see [Editor setup](#editor-setup-zls)                                       |
+| stale weird errors after `pguse`                  | `rm -rf .zig-cache` in the package and rebuild                                                                        |
 
 Useful commands:
 
