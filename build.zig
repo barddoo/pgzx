@@ -164,8 +164,16 @@ pub fn build(b: *std.Build) void {
     {
         // Internal target to build the docs from the document. The generated
         // documentation is installed in the <prefix>/share/pgzx/doc folder.
+        //
+        // The object name becomes the tar package/dir name, so it must match
+        // the module root file's basename: Zig's autodoc picks a package's root
+        // as `<pkg>/<pkg>.zig` (or `<pkg>/root.zig`), else the first file in
+        // the tar. With the name "docs", `src/pgzx.zig` never matched and the
+        // landing page fell back to `src/testing.zig`; naming it "pgzx" makes
+        // `src/pgzx.zig` -> `pgzx/pgzx.zig` the root, so the docs open on the
+        // pgzx API instead of the unit-test entrypoint.
         const obj = b.addObject(.{
-            .name = "docs",
+            .name = "pgzx",
             .root_module = pgzx,
         });
 
