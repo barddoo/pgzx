@@ -67,15 +67,17 @@ pub const HeapTuple = struct {
 
     /// Form a tuple from Zig values, one per column, converted with the
     /// datum converters using each column's type. `values` is a tuple such as
-    /// `.{ @as(i32, 1), "abc", @as(?i64, null) }`. The values must have the
-    /// representation that matches the column type; this is not checked.
+    /// `.{ @as(i32, 1), "abc", @as(?i64, null) }`, or a struct whose fields are
+    /// the columns in order. The values must have the representation that
+    /// matches the column type; this is not checked.
     pub fn fromValues(tupdesc: TupleDesc, values: anytype) !Self {
-        const n = values.len;
+        const field_names = @typeInfo(@TypeOf(values)).@"struct".field_names;
+        const n = field_names.len;
         if (n != tupdesc.len()) return err.PGError.IncorrectAttributeCount;
 
         var datums: [n]pg.NullableDatum = undefined;
-        inline for (0..n) |i| {
-            datums[i] = try datum.toNullableDatumWithOID(values[i], tupdesc.attr(i).?.atttypid);
+        inline for (field_names, 0..) |name, i| {
+            datums[i] = try datum.toNullableDatumWithOID(@field(values, name), tupdesc.attr(i).?.atttypid);
         }
         return fromDatums(tupdesc, &datums);
     }

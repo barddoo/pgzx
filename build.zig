@@ -93,6 +93,7 @@ pub fn build(b: *std.Build) void {
                 "src/pgzx/c/aio.c",
                 "src/pgzx/c/spin.c",
                 "src/pgzx/c/tuple.c",
+                "src/pgzx/c/srf.c",
             },
             .flags = &[_][]const u8{
                 "-I", pgbuild.getIncludeDir(),

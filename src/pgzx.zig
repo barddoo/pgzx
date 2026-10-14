@@ -58,6 +58,7 @@ pub const PgBox = pgbox.PgBox;
 pub const pq = @import("pgzx/pq.zig");
 pub const shmem = @import("pgzx/shmem.zig");
 pub const spi = @import("pgzx/spi.zig");
+pub const srf = @import("pgzx/srf.zig");
 pub const spinlock = @import("pgzx/spinlock.zig");
 pub const SpinLock = spinlock.SpinLock;
 pub const str = @import("pgzx/str.zig");

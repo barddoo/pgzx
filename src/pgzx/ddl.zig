@@ -52,6 +52,7 @@ const pg = @import("pgzx_pgsys");
 
 const datum = @import("datum.zig");
 const meta = @import("meta.zig");
+const srf = @import("srf.zig");
 
 /// SQL function volatility. `volatile` is the PostgreSQL default.
 pub const Volatility = enum {
@@ -216,6 +217,7 @@ fn returnSqlType(comptime FnType: type) []const u8 {
         else => ret,
     };
     if (payload == void) return "void";
+    if (comptime srf.isSetReturning(payload)) return payload.sql_returns;
     return datum.sqlType(payload);
 }
 
@@ -510,6 +512,34 @@ pub const TestSuite_Ddl = struct {
             },
         },
     };
+
+    pub fn testRenderSetReturning() !void {
+        const set_schema = .{
+            .functions = .{
+                .{ .name = "demo_series", .func = srf.TestFns.series },
+                .{ .name = "demo_pairs", .func = srf.TestFns.pairs, .rows = 100 },
+                .{ .name = "demo_singles", .func = srf.TestFns.singles },
+            },
+        };
+
+        var buffer: [2048]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        try render(&writer, set_schema);
+
+        const expected =
+            \\CREATE FUNCTION demo_series(integer, integer) RETURNS SETOF integer
+            \\AS 'MODULE_PATHNAME'
+            \\LANGUAGE C;
+            \\CREATE FUNCTION demo_pairs(integer) RETURNS TABLE(id integer, label text)
+            \\AS 'MODULE_PATHNAME'
+            \\LANGUAGE C ROWS 100;
+            \\CREATE FUNCTION demo_singles(integer) RETURNS TABLE(value integer)
+            \\AS 'MODULE_PATHNAME'
+            \\LANGUAGE C;
+            \\
+        ;
+        try std.testing.expectEqualStrings(expected, writer.buffered());
+    }
 
     pub fn testRenderAttributes() !void {
         var buffer: [4096]u8 = undefined;

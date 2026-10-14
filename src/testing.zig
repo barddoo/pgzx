@@ -4,6 +4,13 @@ const varatt = @import("pgzx/varatt.zig");
 comptime {
     pgzx.PG_MODULE_MAGIC();
 
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_series", pgzx.srf.TestFns.series);
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_gaps", pgzx.srf.TestFns.gaps);
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_words", pgzx.srf.TestFns.words);
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_pairs", pgzx.srf.TestFns.pairs);
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_singles", pgzx.srf.TestFns.singles);
+    pgzx.PG_FUNCTION_V1("pgzx_test_srf_failing", pgzx.srf.TestFns.failing);
+
     pgzx.testing.registerTests(
         @import("build_options").testfn,
         .{
@@ -31,6 +38,7 @@ comptime {
             pgzx.shmem.TestSuite_Shmem,
             pgzx.spi.TestSuite_Spi,
             pgzx.spinlock.TestSuite_SpinLock,
+            pgzx.srf.TestSuite_Srf,
             pgzx.str.TestSuite_Str,
             pgzx.tupdesc.TestSuite_TupleDesc,
             pgzx.guc.TestSuite_Guc,
