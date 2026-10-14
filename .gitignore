@@ -9,3 +9,11 @@ regression.diffs
 results/
 /out
 /share/
+
+# Generated API docs (rebuilt by `zig build docs`; deployed via CI from
+# zig-out/share/pgzx/docs, not from this directory). docs/BUILD.md is
+# hand-written and stays tracked.
+/docs/index.html
+/docs/main.js
+/docs/main.wasm
+/docs/sources.tar
