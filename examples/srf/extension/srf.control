@@ -1,0 +1,6 @@
+comment = 'pgzx: Set-Returning Functions example (port of pgrx-examples/srf)'
+default_version = '0.1'
+module_pathname = '$libdir/srf'
+relocatable = false
+superuser = false
+schema = 'srf'

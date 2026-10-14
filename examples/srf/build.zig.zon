@@ -1,0 +1,14 @@
+.{
+    .name = .srf,
+    .fingerprint = 0x102ed002a8ef8c21,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}
