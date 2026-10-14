@@ -1,0 +1,60 @@
+---
+name: Docs
+
+# Builds the API docs and publishes them to GitHub Pages on every push to main,
+# so the hosted docs track the tip of the default branch. Releases do not touch
+# Pages; see release.yaml.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  # A newer push to main supersedes an in-flight docs build/deploy.
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Build docs
+    runs-on: ubuntu-24.04
+    env:
+      PG_VERSION: "18"
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v7
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - name: Create local PostgreSQL installation
+        run: |
+          nix develop --command -- pguse "$PG_VERSION"
+          nix develop --command -- pglocal
+      - name: Generate docs
+        run: nix develop --command -- zig build docs
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: zig-out/share/pgzx/docs
+
+  deploy-docs:
+    name: Deploy docs
+    needs: docs
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -2,7 +2,10 @@
 
 # Runs the full CI suite: build every example, start a local PostgreSQL, run
 # the pgzx unit tests, then run each example's own CI script (build, create
-# extension, unit + regression tests, drop). Prints "Success!" on completion.
+# extension, unit + regression tests, drop) for the examples that declare
+# tests. Every example is built; examples with no tests are skipped after the
+# build phase, so a learning example cannot gate the suite. Prints "Success!"
+# on completion.
 #
 # Requires the development shell (`nix develop`), which provides the `pgenv`,
 # `pgstart`, `pgstop` and `pgstatus` helpers and the `pg_config` dispatcher.
@@ -31,11 +34,21 @@ cleanup() {
 trap cleanup TERM INT EXIT
 
 build_example() {
-	(cd "$1" && ./ci/run.sh build)
+	if [ -f "$1/ci/run.sh" ]; then
+		(cd "$1" && ./ci/run.sh build)
+	else
+		(cd "$1" && zig build -freference-trace -p "$PG_HOME")
+	fi
 }
 
 run_example() {
 	(cd "$1" && ./ci/run.sh)
+}
+
+# An example opts into the test phase by declaring tests in its build.zig
+# (`.pg_regress` and/or `.unit`). Examples that only build are skipped.
+has_tests() {
+	grep -qE '^[[:space:]]*\.(pg_regress|unit)[[:space:]]*=' "$1/build.zig" 2>/dev/null
 }
 
 test_pgzx() {
@@ -103,10 +116,14 @@ if ! test_pgzx; then
 fi
 
 for example in "${examples[@]}"; do
-	echo -e "\n\nRun example CI script $example"
-	if ! run_example "$example"; then
-		dump_server_log
-		fail "Failed to run CI script for $example"
+	if has_tests "$example"; then
+		echo -e "\n\nRun example CI script $example"
+		if ! run_example "$example"; then
+			dump_server_log
+			fail "Failed to run CI script for $example"
+		fi
+	else
+		echo -e "\n\nNo tests declared in $example, skipping (already built)"
 	fi
 done
 

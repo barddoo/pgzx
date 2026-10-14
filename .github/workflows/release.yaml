@@ -1,10 +1,9 @@
 ---
 name: Release
 
-# Runs when a version tag is pushed: re-runs the full check, publishes the
-# API docs to GitHub Pages and creates a GitHub release. pgzx is consumed as a
-# Zig package, so the release notes carry the `zig fetch` line (with the
-# package hash) for the tagged source tarball.
+# Runs when a version tag is pushed: re-runs the full check and creates a
+# GitHub release. pgzx is consumed as a Zig package, so the release notes carry
+# the `zig fetch` line (with the package hash) for the tagged source tarball.
 
 on:
   push:
@@ -22,47 +21,6 @@ jobs:
   check:
     name: Check
     uses: ./.github/workflows/check.yaml
-
-  docs:
-    name: Build docs
-    needs: check
-    runs-on: ubuntu-24.04
-    env:
-      PG_VERSION: "18"
-    steps:
-      - name: git checkout
-        uses: actions/checkout@v7
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.17.0
-      - name: Create local PostgreSQL installation
-        run: |
-          nix develop --command -- pguse "$PG_VERSION"
-          nix develop --command -- pglocal
-      - name: Generate docs
-        run: nix develop --command -- zig build docs
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: zig-out/share/pgzx/docs
-
-  deploy-docs:
-    name: Deploy docs
-    needs: docs
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
 
   release:
     name: GitHub release
