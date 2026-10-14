@@ -91,6 +91,10 @@ pub fn main(init: std.process.Init) !void {
         \\}
     );
 
+    // Zig 0.17 multiline string literals do not include a newline after the
+    // final line, so terminate the generated file explicitly.
+    try buf.appendSlice(arena, "\n");
+
     try std.Io.Dir.cwd().writeFile(init.io, .{
         .sub_path = args[1],
         .data = buf.items,

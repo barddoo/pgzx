@@ -26,6 +26,8 @@ jobs:
     name: GitHub release
     needs: check
     runs-on: ubuntu-24.04
+    environment:
+      name: production
     permissions:
       contents: write
     steps:

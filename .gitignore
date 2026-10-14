@@ -1,4 +1,5 @@
 /.pre-commit-config.yaml
+.vscode/
 compile_commands.json
 .cache
 .zig-cache/

@@ -22,15 +22,21 @@ In practice you still need to understand a lot of Postgres internals, and Postgr
 
 The following sample extensions (ordered from simple to complex) show how to use pgzx:
 
-| Extension                                  | Description                                                                                                                                                                             |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [char_count_zig](examples/char_count_zig/) | Adds a function that counts how many times a particular character shows up in a string. Shows how to register a function and how to interpret the parameters.                           |
-| [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name.                                                                                                                           |
-| [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns.                               |
-| [rational](examples/rational/)             | A `rational` base type with btree and hash operator classes. Shows the type system end to end: `pg_type`, operators, `pg_opclass`, casts and how they make indexes and `GROUP BY` work. |
-| [arrays](examples/arrays/)                 | Port of pgrx-examples/arrays. Postgres arrays as Zig slices (`[]const i32`, `[]const ?i32`, `text[]`), plus parameter defaults, `VARIADIC` and `pgzx.IntList`.                          |
-| [spi](examples/spi/)                       | Port of pgrx-examples/spi. Queries with arguments, a prepared plan kept for the session, cursors fetched in batches, subtransactions that skip failing rows, and `SECURITY DEFINER`.    |
-| [file_io](examples/file_io/)               | Backend-safe file I/O through the virtual file descriptor layer (`pgzx.fd`), plus asynchronous VFD reads on PostgreSQL 18 (`pgzx.aio`).                                                 |
+| Extension                                  | Description                                                                                                                                                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [char_count_zig](examples/char_count_zig/) | Adds a function that counts how many times a particular character shows up in a string. Shows how to register a function and how to interpret the parameters.                                                                        |
+| [pghostname_zig](examples/pghostname_zig/) | Adds a function that returns the database server's host name.                                                                                                                                                                        |
+| [sqlfns](examples/sqlfns/)                 | The ways to export a Zig function to SQL: a raw C export, `PG_FUNCTION_V1`, and `PG_EXPORT` for a whole struct or file.                                                                                                              |
+| [guc](examples/guc/)                       | Registers custom GUCs (bool, int, string, enum) in `_PG_init`, including a check hook that clamps a value, and reads them back into SQL.                                                                                             |
+| [bgworker](examples/bgworker/)             | Registers a static background worker (`pgzx.bgworker.register`) that the postmaster launches on the next server start.                                                                                                               |
+| [pg_audit_zig](examples/pgaudit_zig/)      | Inspired by the pgaudit C extension, this one registers callbacks to multiple hooks and uses more advanced error handling and memory allocation patterns.                                                                            |
+| [srf](examples/srf/)                       | Port of pgrx-examples/srf. Set-returning functions with `pgzx.srf.SetOf` (`RETURNS SETOF`) and `pgzx.srf.Table` (`RETURNS TABLE`), driven by a plain Zig iterator.                                                                   |
+| [arrays](examples/arrays/)                 | Port of pgrx-examples/arrays. Postgres arrays as Zig slices (`[]const i32`, `[]const ?i32`, `text[]`), plus parameter defaults, `VARIADIC` and `pgzx.IntList`.                                                                       |
+| [spi_sql](examples/spi_sql/)               | Uses SPI to run SQL statements; the exported functions double as the regression-test fixture.                                                                                                                                        |
+| [spi](examples/spi/)                       | Port of pgrx-examples/spi. Queries with arguments, a prepared plan kept for the session, cursors fetched in batches, subtransactions that skip failing rows, and `SECURITY DEFINER`.                                                 |
+| [rational](examples/rational/)             | A `rational` base type with btree and hash operator classes. Shows the type system end to end: `pg_type`, operators, `pg_opclass`, casts and how they make indexes and `GROUP BY` work.                                              |
+| [file_io](examples/file_io/)               | Backend-safe file I/O through the virtual file descriptor layer (`pgzx.fd`), plus asynchronous VFD reads on PostgreSQL 18 (`pgzx.aio`).                                                                                              |
+| [compress_zig](examples/compress_zig/)     | A Timescale-style columnar compression layer: SPI reads a heap table, encodes it into type-aware batches (`plain`, `rle`, `delta`, `delta2`, `gorilla`, `dictionary`, bit-packed bool) in a sidecar relation, and decodes them back. |
 
 ## Docs
 
@@ -123,6 +129,34 @@ comptime {
 ```
 
 Parameters are received from Postgres serialized, and pgzx deserializes them into Zig types automatically.
+
+### Set-returning functions
+
+`SETOF` and `TABLE` functions return a `pgzx.srf.SetOf(I)` or `pgzx.srf.Table(I)` wrapping an iterator `I`: any struct with a `next(self: *I)` method that yields the next row, or `null` when the set is exhausted. `next` may also return `!?Item` to raise a Zig error as a Postgres error.
+
+```zig
+const Series = struct {
+    cur: i64,
+    finish: i64,
+    step: i64,
+
+    pub fn next(self: *Series) ?i64 {
+        if (self.cur > self.finish) return null;
+        defer self.cur += self.step;
+        return self.cur;
+    }
+};
+
+pub fn srf_series(start: i64, finish: i64, step: i64) pgzx.srf.SetOf(Series) {
+    return .{ .iter = .{ .cur = start, .finish = finish, .step = step } };
+}
+```
+
+For `Table(I)` the item is a struct with one field per column; the field names and the `pgzx.datum` converters (see [SQL schema generation](#sql-schema-generation)) produce the `RETURNS TABLE (...)` clause in generated DDL. Use `SetOf` for a single unnamed column.
+
+Postgres uses the value-per-call protocol: it calls the function once per row. The function body runs only on the first call, in a memory context that lives for the whole set, and the iterator is moved there; later calls run only `next`. Allocate everything the iterator needs while building it with `mem.PGCurrentContextAllocator` — `next` runs in a short-lived per-call context, so memory it allocates is only good for the row it returns. An iterator type may also define `fn deinit(self: *I) void`, which runs when the set ends or the query stops early (a `LIMIT`, an error, a cancelled query); it must not allocate or raise errors.
+
+See `examples/srf` for a complete set of fixtures, including nullable columns and iterators that fail.
 
 ### SQL schema generation
 
@@ -218,46 +252,17 @@ zig build unit -p $PG_HOME
 
 This builds a dedicated `{name}_unit` library with `testfn = true`, deploys it, and calls `SELECT run_tests();`. The separate library name means the test build never collides with the production extension.
 
-## Status/Roadmap
+## Status
 
 pgzx is under heavy development by the [Xata](https://xata.io) team. Expect breaking changes and potential instability. If you need help, join us on the [Xata discord](https://xata.io/discord).
 
-* Utilities
-  * [x] Postgres versions (compile and test)
-    * [x] Postgres 15
-    * [x] Postgres 16
-    * [x] Postgres 17
-    * [x] Postgres 18
-    * [ ] Postgres 14
-  * [x] Logging
-  * [x] Error handling
-  * [x] Memory context allocators
-  * [x] Function manager
-  * [x] SQL/DDL generation
-  * [x] Background worker process
-  * [x] LWLocks
-  * [x] Signals and interrupts
-  * [x] String formatting
-  * [x] Shared memory
-  * [x] SPI
-  * [x] GUCs (custom variables)
-  * Postgres data structure wrappers:
-    * Array based list (List)
-      * [x] Pointer list
-      * [ ] int list
-      * [ ] oid list
-      * ...
-    * [x] Single list
-    * [x] Double list
-    * [x] Hash tables
-* Development environment
-  * [ ] Download and vendor Postgres source code
-  * [x] Compile example extensions against the Postgres source code
-  * [x] Build target to run Postgres regression tests
-  * [x] Run unit tests in the Postgres environment
-  * [x] Provide a standard way to test extensions from separate repos
-* Packaging
-  * [x] Add support for Zig packaging
+PostgreSQL 15, 16, 17 and 18 are supported: the examples and unit tests are compiled and run against all four in CI. PostgreSQL 14 is not supported yet.
+
+[ROADMAP.md](ROADMAP.md) tracks the feature status relative to [pgrx](https://github.com/pgcentralfoundation/pgrx):
+
+* **Done** — SQL/DDL generation, set-returning functions, composite and custom types, arrays and int/oid lists, operators and casts, SPI, GUCs, background workers, heap tuple access.
+* **In progress** — the remaining Datum conversions (json/jsonb, numeric, inet/cidr, ranges), a generic hook/callback registry, concurrency (latches, dynamic workers, DSM/DSA), and a full FFI error-safety audit.
+* **Planned** — triggers, aggregates, `zig build package`, and PostgreSQL 14 support, among other items.
 
 ## Contributing
 
