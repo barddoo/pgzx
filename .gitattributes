@@ -1,0 +1,21 @@
+# Normalize line endings: text files are stored with LF; git applies the
+# user's preferred EOL on checkout. Binary files are left untouched.
+* text=auto
+
+# Always LF in the repo — CRLF would break these (or the tools that read them)
+# on Windows.
+*.c       text eol=lf
+*.h       text eol=lf
+*.zig     text eol=lf
+*.zon     text eol=lf
+*.sh      text eol=lf
+*.nix     text eol=lf
+*.sql     text eol=lf
+*.control text eol=lf
+*.out     text eol=lf
+
+# Extensionless helper scripts under dev/bin.
+dev/bin/* text eol=lf
+
+# Generated lock file — keep it out of GitHub's language statistics.
+flake.lock linguist-generated
