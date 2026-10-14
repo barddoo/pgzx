@@ -23,6 +23,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
+    environment: production
     steps:
       - name: git checkout
         uses: actions/checkout@v7
@@ -34,6 +35,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, PostgreSQL ${{ matrix.pg }})
     runs-on: ${{ matrix.os }}
+    environment: production
     strategy:
       # One failing PostgreSQL version must not hide the state of the others.
       fail-fast: false
