@@ -264,4 +264,4 @@ The `executorCheckPermsHook` function receives the list of tables (`rangeTable`)
     }
 ```
 
-[pgzx_Development]: https://github.com/xataio/pgzx/tree/main?tab=readme-ov-file#develpment-shell-and-local-installation
+[pgzx_Development]: https://github.com/barddoo/pgzx/tree/main?tab=readme-ov-file#develpment-shell-and-local-installation

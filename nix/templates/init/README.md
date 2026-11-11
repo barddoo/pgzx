@@ -27,7 +27,7 @@ $ pgstart
 $ zig build
 
 Fetch Packages... pgzx... build.zig.zon:13:20: error: url field is missing corresponding hash field
-            .url = "https://github.com/xataio/pgzx/archive/main.tar.gz",
+            .url = "https://github.com/barddoo/pgzx/archive/main.tar.gz",
                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 note: expected .hash = "122097e7141a57b8170ca5288f5514b2b5b27b730a78d2aae7a5f54675ae1614c690",
 ```

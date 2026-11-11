@@ -300,7 +300,7 @@ has a `zig build test` target that runs under `zig test`.
 Use the flake template:
 
 ```sh
-nix flake init -t github:xataio/pgzx
+nix flake init -t github:barddoo/pgzx
 nix develop
 pguse 16 && pglocal && pginit
 zig build -p "$PG_HOME"

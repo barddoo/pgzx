@@ -101,9 +101,9 @@ The extensions contains regression tests using the `pg_regress` tool, see the `s
 zig build pg_regress
 ```
 
-[pgzx_Development]: https://github.com/xataio/pgzx/tree/main?tab=readme-ov-file#develpment-shell-and-local-installation
-[docs_PG_MODULE_MAGIC]: https://xataio.github.io/pgzx/#A;pgzx:fmgr.PG_MAGIC
-[docs_PG_FUNCTION_V1]: https://xataio.github.io/pgzx/#A;pgzx:PG_FUNCTION_V1
-[docs_Error]: https://xataio.github.io/pgzx/#A;pgzx:elog.Error
-[docs_Info]: https://xataio.github.io/pgzx/#A;pgzx:elog.Info
+[pgzx_Development]: https://github.com/barddoo/pgzx/tree/main?tab=readme-ov-file#develpment-shell-and-local-installation
+[docs_PG_MODULE_MAGIC]: https://barddoo.github.io/pgzx/#A;pgzx:fmgr.PG_MAGIC
+[docs_PG_FUNCTION_V1]: https://barddoo.github.io/pgzx/#A;pgzx:PG_FUNCTION_V1
+[docs_Error]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Error
+[docs_Info]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Info
 

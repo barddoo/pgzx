@@ -7,7 +7,7 @@
     },
     .dependencies = .{
         .pgzx = .{
-            .url = "https://github.com/xataio/pgzx/archive/main.tar.gz",
+            .url = "https://github.com/barddoo/pgzx/archive/main.tar.gz",
             // .hash = "..."
         },
     },

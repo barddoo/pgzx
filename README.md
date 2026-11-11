@@ -3,8 +3,8 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/xataio/pgzx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green" alt="License - Apache 2.0"></a>&nbsp;
-  <a href="https://github.com/xataio/pgzx/actions?query=branch%3Amain"><img src="https://github.com/barddoo/pgzx/actions/workflows/check.yaml/badge.svg" alt="CI Build"></a> &nbsp;
+  <a href="https://github.com/barddoo/pgzx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green" alt="License - Apache 2.0"></a>&nbsp;
+  <a href="https://github.com/barddoo/pgzx/actions?query=branch%3Amain"><img src="https://github.com/barddoo/pgzx/actions/workflows/check.yaml/badge.svg" alt="CI Build"></a> &nbsp;
 </p>
 
 
@@ -40,7 +40,7 @@ The following sample extensions (ordered from simple to complex) show how to use
 
 ## Docs
 
-The reference documentation is available at [here](https://xataio.github.io/pgzx/#docs.pgzx). The examples above are the best place to start; the sections below walk through the most important utilities.
+The reference documentation is available at [here](https://barddoo.github.io/pgzx/#docs.pgzx). The examples above are the best place to start; the sections below walk through the most important utilities.
 
 ### Getting Started
 
@@ -49,7 +49,7 @@ This project uses [Nix flakes](https://nixos.wiki/wiki/Flakes) to manage build d
 ```
 $ mkdir my_extension
 $ cd my_extension
-$ nix flake init -t github:xataio/pgzx
+$ nix flake init -t github:barddoo/pgzx
 ```
 
 This creates a working extension named `my_extension` exporting a `hello()` function. Its [README](./nix/templates/init/README.md) explains how to enter the shell, build, and test it. Rename the project by updating the files in `extension/` and replacing `my_extension` in `README.md`, `build.zig`, `build.zig.zon`, and the extension SQL file.
@@ -254,7 +254,7 @@ This builds a dedicated `{name}_unit` library with `testfn = true`, deploys it, 
 
 ## Status
 
-pgzx is under heavy development by the [Xata](https://xata.io) team. Expect breaking changes and potential instability. If you need help, join us on the [Xata discord](https://xata.io/discord).
+pgzx is under heavy development. Expect breaking changes and potential instability. If you need help, open an issue in this repository.
 
 PostgreSQL 15, 16, 17 and 18 are supported: the examples and unit tests are compiled and run against all four in CI. PostgreSQL 14 is not supported yet.
 
@@ -286,21 +286,21 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Support
 
-If you have any questions, encounter issues, or need assistance, open an issue in this repository or join our [Discord](https://xata.io/discord), and our community will be happy to help.
+If you have any questions, encounter issues, or need assistance, open an issue in this repository and our community will be happy to help.
 
 
 <br>
-<p align="right">Made with :heart: by <a href="https://xata.io">Xata 🦋</a></p>
+<p align="right">This project is based on the original <a href="https://github.com/xataio/pgzx">pgzx</a> code.</p>
 
 
-[docs_Log]: https://xataio.github.io/pgzx/#A;pgzx:elog.Log
-[docs_Info]: https://xataio.github.io/pgzx/#A;pgzx:elog.Info
-[docs_Notice]: https://xataio.github.io/pgzx/#A;pgzx:elog.Notice
-[docs_Warning]: https://xataio.github.io/pgzx/#A;pgzx:elog.Warning
-[docs_Error]: https://xataio.github.io/pgzx/#A;pgzx:elog.Error
-[docs_ErrorThrow]: https://xataio.github.io/pgzx/#A;pgzx:elog.ErrorThrow
-[docs_Context]: https://xataio.github.io/pgzx/#A;pgzx:err.Context
-[docs_wrap]: https://xataio.github.io/pgzx/#A;pgzx:err.wrap
-[docs_createAllocSetContext]: https://xataio.github.io/pgzx/#A;pgzx:mem.createAllocSetContext
-[docs_MemoryContextAllocator]: https://xataio.github.io/pgzx/#A;pgzx:mem.MemoryContextAllocator
-[docs_PG_FUNCTION_V1]: https://xataio.github.io/pgzx/#A;pgzx:PG_FUNCTION_V1
+[docs_Log]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Log
+[docs_Info]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Info
+[docs_Notice]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Notice
+[docs_Warning]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Warning
+[docs_Error]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Error
+[docs_ErrorThrow]: https://barddoo.github.io/pgzx/#A;pgzx:elog.ErrorThrow
+[docs_Context]: https://barddoo.github.io/pgzx/#A;pgzx:err.Context
+[docs_wrap]: https://barddoo.github.io/pgzx/#A;pgzx:err.wrap
+[docs_createAllocSetContext]: https://barddoo.github.io/pgzx/#A;pgzx:mem.createAllocSetContext
+[docs_MemoryContextAllocator]: https://barddoo.github.io/pgzx/#A;pgzx:mem.MemoryContextAllocator
+[docs_PG_FUNCTION_V1]: https://barddoo.github.io/pgzx/#A;pgzx:PG_FUNCTION_V1

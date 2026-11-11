@@ -23,7 +23,7 @@
     # pgzx flake provides us with extra tools and a supported version of the Zig compiler.
     # The flake re-exports the zig-overlay and zls flakes.
     pgzx = {
-      url = "github:xataio/pgzx";
+      url = "github:barddoo/pgzx";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
