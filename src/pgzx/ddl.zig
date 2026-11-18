@@ -146,7 +146,8 @@ fn Function(comptime decl: anytype) type {
         pub const strict: bool = if (@hasField(D, "strict")) decl.strict else false;
         pub const parallel: ?Parallel = if (@hasField(D, "parallel")) decl.parallel else null;
         pub const returns: ?[]const u8 = if (@hasField(D, "returns")) decl.returns else null;
-        pub const args: ?[]const []const u8 = if (@hasField(D, "args")) decl.args else null;
+        // Trigger functions have no SQL arguments; skip derivation automatically.
+        pub const args: ?[]const []const u8 = if (@hasField(D, "args")) decl.args else if (@hasField(D, "returns") and std.mem.eql(u8, decl.returns, "trigger")) &.{} else null;
         pub const symbol: ?[]const u8 = if (@hasField(D, "symbol")) decl.symbol else null;
         pub const comment: ?[]const u8 = if (@hasField(D, "comment")) decl.comment else null;
         pub const params: ?[]const Param = if (@hasField(D, "params")) coerceSlice(Param, decl.params) else null;
@@ -221,6 +222,165 @@ fn returnSqlType(comptime FnType: type) []const u8 {
     return datum.sqlType(payload);
 }
 
+// ---------------------------------------------------------------------------
+// Aggregate DDL
+// ---------------------------------------------------------------------------
+
+/// Compile-time aggregate declaration used in `pgzx_sql.aggregates`.
+///
+/// The transition, final, combine and serial functions must be declared in
+/// `.functions` (or exist already) and are referenced by SQL name. Use
+/// `STYPE = internal` with `aggregate.stateOrInit` for Zig-side state.
+///
+/// ```zig
+/// pub const pgzx_sql = .{
+///     .functions = .{
+///         .{ .name = "geomean_accum", .func = accum, .args = &.{ "internal", "float8" }, .returns = "internal" },
+///         .{ .name = "geomean_final", .func = final, .args = &.{"internal"}, .returns = "float8" },
+///     },
+///     .aggregates = .{
+///         .{
+///             .name = "geomean",
+///             .args = &.{"float8"},
+///             .sfunc = "geomean_accum",
+///             .stype = "internal",
+///             .finalfunc = "geomean_final",
+///         },
+///     },
+/// };
+/// ```
+pub const AggregateDecl = struct {
+    /// SQL name of the aggregate.
+    name: []const u8,
+    /// SQL input argument types. An empty list renders `(*)`, as for `count(*)`.
+    args: []const []const u8 = &.{},
+    /// Transition function.
+    sfunc: []const u8,
+    /// Transition state type, for example `internal` or `float8[]`.
+    stype: []const u8,
+    /// Final function, applied once per group to produce the result.
+    finalfunc: ?[]const u8 = null,
+    /// Combine function for parallel aggregation. Requires `parallel` to be set.
+    combinefunc: ?[]const u8 = null,
+    /// Serialize and deserialize functions, required when `stype` is `internal`
+    /// and `combinefunc` is set.
+    serialfunc: ?[]const u8 = null,
+    deserialfunc: ?[]const u8 = null,
+    /// Initial state as text. Omit it to start from NULL.
+    initcond: ?[]const u8 = null,
+    /// Parallel safety of the aggregate.
+    parallel: ?Parallel = null,
+    /// Whether to emit CREATE OR REPLACE AGGREGATE.
+    or_replace: bool = false,
+};
+
+/// Accepts an optional field given as a plain value (`.parallel = .safe`),
+/// as an optional (`?[]const u8`), or as `null`.
+fn optionalText(comptime v: anytype) ?[]const u8 {
+    return v;
+}
+
+fn optionalParallel(comptime v: anytype) ?Parallel {
+    return v;
+}
+
+fn renderAggregate(writer: anytype, comptime decl: anytype) !void {
+    const D = @TypeOf(decl);
+    const or_replace: bool = if (@hasField(D, "or_replace")) decl.or_replace else false;
+    const args: []const []const u8 = if (@hasField(D, "args")) decl.args else &.{};
+
+    try writer.writeAll(if (or_replace) "CREATE OR REPLACE AGGREGATE " else "CREATE AGGREGATE ");
+    try writer.writeAll(decl.name);
+    try writer.writeAll("(");
+    if (args.len == 0) {
+        try writer.writeAll("*");
+    } else {
+        inline for (args, 0..) |arg, i| {
+            if (i > 0) try writer.writeAll(", ");
+            try writer.writeAll(arg);
+        }
+    }
+    try writer.writeAll(")\n(\n    SFUNC = ");
+    try writer.writeAll(decl.sfunc);
+    try writer.writeAll(",\n    STYPE = ");
+    try writer.writeAll(decl.stype);
+
+    inline for (.{
+        .{ "finalfunc", "FINALFUNC" },
+        .{ "combinefunc", "COMBINEFUNC" },
+        .{ "serialfunc", "SERIALFUNC" },
+        .{ "deserialfunc", "DESERIALFUNC" },
+    }) |entry| {
+        if (@hasField(D, entry[0])) {
+            if (optionalText(@field(decl, entry[0]))) |value| {
+                try writer.writeAll(",\n    " ++ entry[1] ++ " = ");
+                try writer.writeAll(value);
+            }
+        }
+    }
+    if (@hasField(D, "initcond")) {
+        if (optionalText(decl.initcond)) |value| {
+            try writer.writeAll(",\n    INITCOND = ");
+            try writeSqlString(writer, value);
+        }
+    }
+    if (@hasField(D, "parallel")) {
+        if (optionalParallel(decl.parallel)) |p| {
+            try writer.writeAll(",\n    PARALLEL = ");
+            try writer.writeAll(p.clause());
+        }
+    }
+
+    try writer.writeAll("\n);\n");
+}
+
+// ---------------------------------------------------------------------------
+// Trigger DDL
+// ---------------------------------------------------------------------------
+
+/// Timing for a CREATE TRIGGER statement.
+pub const TriggerTiming = enum { before, after, instead_of };
+
+/// Event(s) that fire a trigger.
+pub const TriggerEvent = enum { insert, update, delete, truncate };
+
+/// Compile-time trigger declaration used in `pgzx_sql.triggers`.
+///
+/// ```zig
+/// pub const pgzx_sql = .{
+///     .functions = .{
+///         .{ .name = "set_updated_at", .func = set_updated_at, .returns = "trigger" },
+///     },
+///     .triggers = .{
+///         .{
+///             .name = "set_updated_at_trigger",
+///             .func = "set_updated_at",
+///             .table = "my_table",
+///             .timing = .before,
+///             .events = &.{ .insert, .update },
+///         },
+///     },
+/// };
+/// ```
+pub const TriggerDecl = struct {
+    /// SQL name for the trigger.
+    name: []const u8,
+    /// SQL name of the trigger function (must `RETURNS trigger`).
+    func: []const u8,
+    /// Table the trigger fires on.
+    table: []const u8,
+    /// BEFORE / AFTER / INSTEAD OF.
+    timing: TriggerTiming,
+    /// One or more of INSERT, UPDATE, DELETE, TRUNCATE.
+    events: []const TriggerEvent,
+    /// FOR EACH ROW (default) or FOR EACH STATEMENT.
+    level: enum { row, statement } = .row,
+    /// Optional WHEN condition, rendered verbatim inside WHEN (...).
+    when: ?[]const u8 = null,
+    /// Whether to emit CREATE OR REPLACE TRIGGER.
+    or_replace: bool = false,
+};
+
 /// Renders the SQL script for a schema declaration into `writer`.
 ///
 /// `schema` is the comptime declaration value (for example `ext.pgzx_sql`).
@@ -234,7 +394,63 @@ pub fn render(writer: anytype, comptime schema: anytype) !void {
             try renderFunction(writer, decl);
         }
     }
+    if (@hasField(S, "aggregates")) {
+        inline for (schema.aggregates) |decl| {
+            try renderAggregate(writer, decl);
+        }
+    }
+    if (@hasField(S, "triggers")) {
+        inline for (schema.triggers) |decl| {
+            try renderTrigger(writer, decl);
+        }
+    }
     if (@hasField(S, "post_sql")) try renderRawSql(writer, schema.post_sql);
+}
+
+fn renderTrigger(writer: anytype, comptime decl: anytype) !void {
+    const D = @TypeOf(decl);
+    const or_replace: bool = if (@hasField(D, "or_replace")) decl.or_replace else false;
+    const level_val = if (@hasField(D, "level")) decl.level else .row;
+    const when_val: ?[]const u8 = if (@hasField(D, "when")) decl.when else null;
+
+    try writer.writeAll(if (or_replace) "CREATE OR REPLACE TRIGGER " else "CREATE TRIGGER ");
+    try writer.writeAll(decl.name);
+    try writer.writeAll("\n");
+
+    try writer.writeAll(switch (@as(TriggerTiming, decl.timing)) {
+        .before => "BEFORE",
+        .after => "AFTER",
+        .instead_of => "INSTEAD OF",
+    });
+
+    inline for (decl.events, 0..) |ev, i| {
+        if (i == 0) try writer.writeAll(" ") else try writer.writeAll(" OR ");
+        try writer.writeAll(switch (@as(TriggerEvent, ev)) {
+            .insert => "INSERT",
+            .update => "UPDATE",
+            .delete => "DELETE",
+            .truncate => "TRUNCATE",
+        });
+    }
+
+    try writer.writeAll(" ON ");
+    try writer.writeAll(decl.table);
+    try writer.writeAll("\nFOR EACH ");
+    const level_enum = @as(enum { row, statement }, level_val);
+    try writer.writeAll(switch (level_enum) {
+        .row => "ROW",
+        .statement => "STATEMENT",
+    });
+
+    if (when_val) |w| {
+        try writer.writeAll("\nWHEN (");
+        try writer.writeAll(w);
+        try writer.writeAll(")");
+    }
+
+    try writer.writeAll("\nEXECUTE FUNCTION ");
+    try writer.writeAll(decl.func);
+    try writer.writeAll("();\n");
 }
 
 fn renderRawSql(writer: anytype, raw: []const u8) !void {
@@ -470,6 +686,52 @@ pub const TestSuite_Ddl = struct {
             \\
         ;
         try std.testing.expectEqualStrings(expected, out);
+    }
+
+    pub fn testRenderAggregates() !void {
+        const agg_schema = .{
+            .aggregates = .{
+                .{
+                    .name = "geomean",
+                    .args = &.{"float8"},
+                    .sfunc = "geomean_accum",
+                    .stype = "internal",
+                    .finalfunc = "geomean_final",
+                    .parallel = .safe,
+                },
+                .{
+                    .name = "my_count",
+                    .sfunc = "int8inc",
+                    .stype = "bigint",
+                    .combinefunc = "int8pl",
+                    .initcond = "0",
+                    .or_replace = true,
+                },
+            },
+        };
+
+        var buffer: [1024]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        try render(&writer, agg_schema);
+
+        const expected =
+            \\CREATE AGGREGATE geomean(float8)
+            \\(
+            \\    SFUNC = geomean_accum,
+            \\    STYPE = internal,
+            \\    FINALFUNC = geomean_final,
+            \\    PARALLEL = SAFE
+            \\);
+            \\CREATE OR REPLACE AGGREGATE my_count(*)
+            \\(
+            \\    SFUNC = int8inc,
+            \\    STYPE = bigint,
+            \\    COMBINEFUNC = int8pl,
+            \\    INITCOND = '0'
+            \\);
+            \\
+        ;
+        try std.testing.expectEqualStrings(expected, writer.buffered());
     }
 
     const attr_schema = .{

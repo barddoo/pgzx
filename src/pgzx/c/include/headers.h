@@ -175,6 +175,8 @@
 #include "storage/lwlock.h"
 #include "storage/pg_shmem.h"
 #include "storage/shmem.h"
+#include "storage/dsm.h"
+#include "utils/dsa.h"
 #include "storage/spin.h"
 #include "spin_helpers.h"
 #include "tuple_helpers.h"

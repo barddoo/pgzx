@@ -15,6 +15,15 @@ pub const PGError = error{
     WorkerNotRunning,
     PostmasterDied,
 
+    // Aggregate errors
+    NotCalledAsAggregate,
+
+    // Shared memory errors
+    SegmentCreateFailed,
+    SegmentNotFound,
+    AreaCreateFailed,
+    AreaAttachFailed,
+
     // Datum value conversion errors
     NotEnoughArguments,
     UnexpectedNullValue,
@@ -36,6 +45,9 @@ pub const PGError = error{
     SPITransaction,
     SPIOpUnknown,
     SPIInvalidRowIndex,
+
+    // Trigger
+    NotCalledAsTrigger,
 
     // Signaling
     OperationCanceled,

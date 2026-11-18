@@ -1,0 +1,14 @@
+.{
+    .name = .triggers,
+    .fingerprint = 0xece894dee5b5952,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

@@ -1,0 +1,28 @@
+CREATE EXTENSION triggers;
+SET search_path TO triggers;
+INSERT INTO products (name) VALUES ('widget') RETURNING id, name;
+ id |  name
+----+--------
+  1 | WIDGET
+(1 row)
+
+INSERT INTO products (name) VALUES ('Gadget') RETURNING id, name;
+ id |  name
+----+--------
+  2 | GADGET
+(1 row)
+
+UPDATE products SET name = 'super widget' WHERE name = 'WIDGET' RETURNING id, name;
+ id |     name
+----+--------------
+  1 | SUPER WIDGET
+(1 row)
+
+SELECT name FROM products ORDER BY id;
+     name
+--------------
+ SUPER WIDGET
+ GADGET
+(2 rows)
+
+DROP EXTENSION triggers;

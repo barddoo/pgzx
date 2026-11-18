@@ -1,0 +1,14 @@
+.{
+    .name = .aggregate,
+    .fingerprint = 0xb77949ff51b96c7e,
+    .version = "0.1.0",
+    .paths = .{
+        "extension",
+        "src",
+    },
+    .dependencies = .{
+        .pgzx = .{
+            .path = "./../..",
+        },
+    },
+}

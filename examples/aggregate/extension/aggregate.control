@@ -1,0 +1,5 @@
+# aggregate extension
+comment = 'demonstrates a user-defined aggregate'
+default_version = '0.1'
+module_pathname = '$libdir/aggregate'
+relocatable = true

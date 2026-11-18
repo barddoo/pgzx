@@ -4,6 +4,8 @@
 //! The global locks like `AddinShmemInitLock` are not directly accessible from
 //! the generated C bindings. We provide wrapper functions for them here.
 
+const std = @import("std");
+
 const pg = @import("pgzx_pgsys");
 
 // access `MainLWLockArray`.
@@ -68,12 +70,70 @@ pub const WALSummarizer = mainLock(49);
 pub const DSMRegistry = mainLock(50);
 pub const InjectionPoint = mainLock(51);
 
+pub const Mode = enum {
+    shared,
+    exclusive,
+
+    fn raw(self: Mode) pg.LWLockMode {
+        return switch (self) {
+            .shared => pg.LW_SHARED,
+            .exclusive => pg.LW_EXCLUSIVE,
+        };
+    }
+};
+
+/// Acquires `lock` in `mode`, waiting while another process holds it.
+pub fn acquire(lock: *pg.LWLock, mode: Mode) void {
+    _ = pg.LWLockAcquire(lock, mode.raw());
+}
+
+/// Acquires `lock` only if no other process holds it in a conflicting mode.
+pub fn tryAcquire(lock: *pg.LWLock, mode: Mode) bool {
+    return pg.LWLockConditionalAcquire(lock, mode.raw());
+}
+
+pub fn release(lock: *pg.LWLock) void {
+    pg.LWLockRelease(lock);
+}
+
+/// Acquires `lock` and returns a guard that releases it. Use with `defer`:
+///
+/// ```zig
+/// const g = lwlock.hold(lwlock.ProcArray(), .shared);
+/// defer g.release();
+/// ```
+pub fn hold(lock: *pg.LWLock, mode: Mode) Guard {
+    acquire(lock, mode);
+    return .{ .lock = lock };
+}
+
+pub const Guard = struct {
+    lock: *pg.LWLock,
+
+    pub fn release(self: Guard) void {
+        lwlock.release(self.lock);
+    }
+};
+
+const lwlock = @This();
+
 pub const TestSuite_LWLock = struct {
     pub fn testAcquireRelease() !void {
-        _ = pg.LWLockAcquire(ProcArray(), pg.LW_EXCLUSIVE);
-        pg.LWLockRelease(ProcArray());
+        acquire(ProcArray(), .exclusive);
+        release(ProcArray());
 
-        _ = pg.LWLockAcquire(ShmemIndex(), pg.LW_SHARED);
-        pg.LWLockRelease(ShmemIndex());
+        acquire(ShmemIndex(), .shared);
+        release(ShmemIndex());
+    }
+
+    pub fn testTryAcquire() !void {
+        try std.testing.expect(tryAcquire(ShmemIndex(), .exclusive));
+        release(ShmemIndex());
+    }
+
+    pub fn testHoldGuard() !void {
+        const g = hold(OidGen(), .shared);
+        defer g.release();
+        try std.testing.expect(pg.LWLockHeldByMeInMode(OidGen(), pg.LW_SHARED));
     }
 };

@@ -5,6 +5,7 @@ const pg = pgzx.c;
 
 const elog = @import("elog.zig");
 const err = @import("err.zig");
+const latch = @import("latch.zig");
 const lwlock = @import("lwlock.zig");
 
 pub const BackgroundWorker = pg.BackgroundWorker;
@@ -42,6 +43,11 @@ pub fn registerDynamic(
     });
 
     var bw = initBackgroundWorker(name, library_name, function_name, options);
+    // The postmaster only signals the backend about start and exit when
+    // bgw_notify_pid is set. Without it WaitForBackgroundWorker* never wakes.
+    if (options.notify_pid == 0) {
+        bw.bgw_notify_pid = pg.MyProcPid;
+    }
 
     std.log.debug("registering dynamic background worker: {s} {s} {s}", .{
         name,
@@ -60,6 +66,28 @@ pub fn registerDynamic(
         function_name,
     });
     return handle.?;
+}
+
+/// Block until a dynamic worker has started. Returns its PID. Fails if the
+/// worker stopped before starting or the postmaster died.
+pub fn waitForStartup(handle: *pg.BackgroundWorkerHandle) !pg.pid_t {
+    var pid: pg.pid_t = 0;
+    return switch (pg.WaitForBackgroundWorkerStartup(handle, &pid)) {
+        pg.BGWH_STARTED => pid,
+        pg.BGWH_STOPPED => err.PGError.FailStartBackgroundWorker,
+        pg.BGWH_POSTMASTER_DIED => err.PGError.PostmasterDied,
+        else => err.PGError.WorkerNotRunning,
+    };
+}
+
+/// Block until a dynamic worker has exited. Fails if the postmaster died
+/// before the worker's exit could be confirmed.
+pub fn waitForShutdown(handle: *pg.BackgroundWorkerHandle) !void {
+    return switch (pg.WaitForBackgroundWorkerShutdown(handle)) {
+        pg.BGWH_STOPPED => {},
+        pg.BGWH_POSTMASTER_DIED => err.PGError.PostmasterDied,
+        else => err.PGError.WorkerNotRunning,
+    };
 }
 
 fn initBackgroundWorker(
@@ -112,7 +140,7 @@ pub fn finalizeSignal(arg: c_int) void {
     _ = arg;
     const save_errno = std.c._errno().*;
     if (pg.MyProc != null) {
-        pg.SetLatch(&pg.MyProc.*.procLatch);
+        latch.set(&pg.MyProc.*.procLatch);
     }
     std.c._errno().* = save_errno;
 }

@@ -1,2 +1,15 @@
 CREATE EXTENSION bgworker;
+SELECT pgzx_bgworker_roundtrip();
+ pgzx_bgworker_roundtrip 
+-------------------------
+ t
+(1 row)
+
+-- value passed through a dynamic shared memory segment and doubled by a worker
+SELECT pgzx_bgworker_double(21);
+ pgzx_bgworker_double 
+----------------------
+                   42
+(1 row)
+
 DROP EXTENSION bgworker;

@@ -24,6 +24,8 @@ pub fn build(b: *std.Build) void {
         .install_unit = b.step("install-unit", "Install unit tests extension (for manual testing)"),
 
         .unit = b.step("unit", "Run pgzx unit tests"),
+
+        .package = b.step("package", "Create a source tarball and PGXN META.json in zig-out/package"),
     };
 
     // pgzx_pgsys module: C bindings to Postgres
@@ -210,6 +212,62 @@ pub fn build(b: *std.Build) void {
         });
         serve_docs.step.dependOn(&copy_docs.step);
         steps.serve_docs.dependOn(&serve_docs.step);
+    }
+
+    // Source package: `pgzx-<version>.tar.gz` plus PGXN `META.json`, both
+    // installed into zig-out/package. The version comes from build.zig.zon.
+    {
+        const zon = @import("build.zig.zon");
+        const version: []const u8 = zon.version;
+        const dir_name = b.fmt("pgzx-{s}", .{version});
+
+        const meta_json = b.fmt(
+            \\{{
+            \\  "name": "pgzx",
+            \\  "abstract": "Create Postgres Extensions with Zig!",
+            \\  "description": "pgzx is a Zig library for writing PostgreSQL extensions.",
+            \\  "version": "{s}",
+            \\  "maintainer": "Charles Fonseca <charles.fonseca@pm.me>",
+            \\  "license": "apache_2_0",
+            \\  "release_status": "unstable",
+            \\  "provides": {{}},
+            \\  "meta-spec": {{
+            \\    "version": "1.0.0",
+            \\    "url": "https://pgxn.org/meta/spec.txt"
+            \\  }},
+            \\  "resources": {{
+            \\    "homepage": "https://github.com/barddoo/pgzx",
+            \\    "repository": {{
+            \\      "url": "https://github.com/barddoo/pgzx.git",
+            \\      "web": "https://github.com/barddoo/pgzx",
+            \\      "type": "git"
+            \\    }}
+            \\  }}
+            \\}}
+            \\
+        , .{version});
+
+        const files = b.addWriteFiles();
+        const meta = files.add("META.json", meta_json);
+
+        const archive = b.addSystemCommand(&.{ "sh", "-c",
+            \\set -e
+            \\stage=$(mktemp -d)
+            \\mkdir "$stage/$2"
+            \\cp -R build.zig build.zig.zon src tools LICENSE README.md "$stage/$2/"
+            \\cp "$3" "$stage/$2/META.json"
+            \\tar -C "$stage" -czf "$1" "$2"
+            \\rm -rf "$stage"
+        , "sh" });
+        archive.setCwd(b.path(""));
+        const tarball = archive.addOutputFileArg(b.fmt("{s}.tar.gz", .{dir_name}));
+        archive.addArg(dir_name);
+        archive.addFileArg(meta);
+
+        const install_tarball = b.addInstallFile(tarball, b.fmt("package/{s}.tar.gz", .{dir_name}));
+        const install_meta = b.addInstallFile(meta, "package/META.json");
+        steps.package.dependOn(&install_tarball.step);
+        steps.package.dependOn(&install_meta.step);
     }
 
     // Pure-Zig tests: run under `zig test` for modules that do not depend on a

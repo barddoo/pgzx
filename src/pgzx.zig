@@ -12,6 +12,11 @@ pub const pg = c;
 // Utility functions for working with the PostgreSQL C API.
 pub const atomics = @import("pgzx/atomics.zig");
 pub const bgworker = @import("pgzx/bgworker.zig");
+pub const latch = @import("pgzx/latch.zig");
+pub const aggregate = @import("pgzx/aggregate.zig");
+pub const dsm = @import("pgzx/dsm.zig");
+pub const dsa = @import("pgzx/dsa.zig");
+pub const hooks = @import("pgzx/hooks.zig");
 
 pub const collections = @import("pgzx/collections.zig");
 pub const PointerListOf = collections.list.PointerListOf;
@@ -50,6 +55,9 @@ pub const PG_MODULE_MAGIC = fmgr.PG_MODULE_MAGIC;
 pub const PG_FUNCTION_V1 = fmgr.PG_FUNCTION_V1;
 pub const PG_FUNCTION_INFO_V1 = fmgr.PG_FUNCTION_INFO_V1;
 pub const PG_EXPORT = fmgr.PG_EXPORT;
+pub const PG_TRIGGER_V1 = fmgr.PG_TRIGGER_V1;
+
+pub const trigger = @import("pgzx/trigger.zig");
 
 pub const lwlock = @import("pgzx/lwlock.zig");
 pub const mem = @import("pgzx/mem.zig");

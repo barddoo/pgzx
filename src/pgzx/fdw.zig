@@ -335,3 +335,60 @@ pub fn validateOid(def: *const pg.DefElem, context: pg.Oid) void {
     _ = context;
     _ = getOid(def);
 }
+
+/// Builds the `FdwRoutine` table from the public declarations of `Impl`.
+///
+/// Declare each callback PostgreSQL should call with its own name, for example
+/// `pub fn BeginForeignScan(...) callconv(.c) void`. Its signature must match
+/// the callback type in `FdwRoutine`, otherwise the build fails. Callbacks that
+/// `Impl` does not declare stay NULL, which PostgreSQL treats as unsupported.
+pub fn routine(comptime Impl: type) pg.FdwRoutine {
+    comptime {
+        var table = std.mem.zeroes(pg.FdwRoutine);
+        table.@"type" = pg.T_FdwRoutine;
+        for (std.meta.fieldNames(pg.FdwRoutine)) |name| {
+            if (std.mem.eql(u8, name, "type")) continue;
+            if (@hasDecl(Impl, name)) {
+                @field(table, name) = @field(Impl, name);
+            }
+        }
+        return table;
+    }
+}
+
+/// Returns a PG_FUNCTION_V1 callback for a foreign data wrapper handler, which
+/// returns a pointer to the routine table built from `Impl`:
+///
+/// ```zig
+/// pgzx.PG_FUNCTION_V1("my_fdw_handler", fdw.handler(MyFdw));
+/// ```
+pub fn handler(comptime Impl: type) fn (pg.FunctionCallInfo) pg.Datum {
+    return struct {
+        const table = routine(Impl);
+
+        fn call(fcinfo: pg.FunctionCallInfo) pg.Datum {
+            _ = fcinfo;
+            return @intFromPtr(&table);
+        }
+    }.call;
+}
+
+pub const TestSuite_Fdw = struct {
+    const Declared = struct {
+        pub fn ExplainForeignScan(node: [*c]pg.ForeignScanState, es: [*c]pg.ExplainState) callconv(.c) void {
+            _ = node;
+            _ = es;
+        }
+    };
+
+    pub fn testRoutineTypeTag() !void {
+        const table = comptime routine(struct {});
+        try std.testing.expectEqual(pg.T_FdwRoutine, table.@"type");
+    }
+
+    pub fn testDeclaredCallbackIsSet() !void {
+        const table = comptime routine(Declared);
+        try std.testing.expect(table.ExplainForeignScan != null);
+        try std.testing.expect(table.BeginForeignScan == null);
+    }
+};

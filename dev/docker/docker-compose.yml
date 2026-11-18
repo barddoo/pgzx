@@ -1,0 +1,27 @@
+# One-command dev environment (no Nix).
+#
+# Usage:
+#   docker compose run --rm dev        # interactive shell
+#   docker compose run --rm dev bash -c "zig build check"
+#
+# First run builds the image (~3 min; cached after that).
+# The repo is mounted at /workspace so edits on the host are live inside.
+
+services:
+  dev:
+    build:
+      context: ../..
+      dockerfile: dev/docker/Dockerfile.standalone
+      args:
+        PG_MAJOR: "18"
+        ZIG_VERSION: "0.17.1"
+    image: pgzx-standalone:pg18
+    volumes:
+      - ../..:/workspace
+    working_dir: /workspace
+    # Keep stdin open for interactive use
+    stdin_open: true
+    tty: true
+    # Suppress the "no such file" warning when /run/postgresql doesn't exist yet
+    tmpfs:
+      - /run/postgresql

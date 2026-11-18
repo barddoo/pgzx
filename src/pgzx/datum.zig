@@ -7,6 +7,7 @@ const heap_tuple = @import("heap_tuple.zig");
 const itemptr = @import("itemptr.zig");
 const mem = @import("mem.zig");
 const meta = @import("meta.zig");
+const range = @import("range.zig");
 const varatt = @import("varatt.zig");
 const xid = @import("xid.zig");
 
@@ -159,6 +160,17 @@ var directMappings = .{
     .{ Timestamp, TimestampConv },
     .{ TimestampTz, TimestampTzConv },
     .{ pg.Interval, IntervalConv },
+    .{ Json, JsonConv },
+    .{ Jsonb, JsonbConv },
+    .{ Numeric, NumericConv },
+    .{ Inet, InetConv },
+    .{ Cidr, CidrConv },
+    .{ range.Int4Range, RangeConv(range.Int4Range, pg.INT4RANGEOID, "int4range") },
+    .{ range.Int8Range, RangeConv(range.Int8Range, pg.INT8RANGEOID, "int8range") },
+    .{ NumRange, RangeConv(NumRange, pg.NUMRANGEOID, "numrange") },
+    .{ TsRange, RangeConv(TsRange, pg.TSRANGEOID, "tsrange") },
+    .{ TstzRange, RangeConv(TstzRange, pg.TSTZRANGEOID, "tstzrange") },
+    .{ DateRange, RangeConv(DateRange, pg.DATERANGEOID, "daterange") },
 };
 
 /// Whether `T` has a dedicated converter, as opposed to being converted by
@@ -499,6 +511,139 @@ const IntervalConv = Conv(struct {
     }
 });
 
+// ---------------------------------------------------------------------------
+// JSON / JSONB / numeric / inet / cidr — type I/O-based converters
+//
+// All five use the same `oidOutputToSlice` / `oidInputFunctionCall` helpers,
+// which call PostgreSQL's own output/input functions via syscache lookup.
+// This avoids translate-c issues with internal varlena representations and
+// keeps the converters consistent.
+// ---------------------------------------------------------------------------
+
+/// `json` mapped to its text representation.
+pub const Json = struct {
+    text: []const u8,
+};
+
+const JsonConv = Conv(struct {
+    pub const Type = Json;
+    pub const sql_name = "json";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .text = try oidOutputToSlice(d, pg.JSONOID) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, v.text, 0);
+        return try oidInputFunctionCall(pg.JSONOID, slice_z.ptr, -1);
+    }
+});
+
+/// `jsonb` mapped to its JSON text representation. The binary jsonb format is
+/// decoded on read and re-encoded on write via the type's input/output functions.
+pub const Jsonb = struct {
+    text: []const u8,
+};
+
+const JsonbConv = Conv(struct {
+    pub const Type = Jsonb;
+    pub const sql_name = "jsonb";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .text = try oidOutputToSlice(d, pg.JSONBOID) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, v.text, 0);
+        return try oidInputFunctionCall(pg.JSONBOID, slice_z.ptr, -1);
+    }
+});
+
+/// `numeric` mapped to its decimal text representation (e.g. `"3.14"`).
+pub const Numeric = struct {
+    text: []const u8,
+};
+
+const NumericConv = Conv(struct {
+    pub const Type = Numeric;
+    pub const sql_name = "numeric";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .text = try oidOutputToSlice(d, pg.NUMERICOID) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, v.text, 0);
+        return try oidInputFunctionCall(pg.NUMERICOID, slice_z.ptr, -1);
+    }
+});
+
+/// `inet` mapped to its text representation (e.g. `"192.168.1.1/32"`).
+pub const Inet = struct {
+    addr: []const u8,
+};
+
+const InetConv = Conv(struct {
+    pub const Type = Inet;
+    pub const sql_name = "inet";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .addr = try oidOutputToSlice(d, pg.INETOID) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, v.addr, 0);
+        return try oidInputFunctionCall(pg.INETOID, slice_z.ptr, -1);
+    }
+});
+
+/// `cidr` mapped to its text representation (e.g. `"192.168.1.0/24"`).
+pub const Cidr = struct {
+    addr: []const u8,
+};
+
+const CidrConv = Conv(struct {
+    pub const Type = Cidr;
+    pub const sql_name = "cidr";
+
+    pub fn from(d: pg.Datum, oid: pg.Oid) !Type {
+        _ = oid;
+        return .{ .addr = try oidOutputToSlice(d, pg.CIDROID) };
+    }
+
+    pub fn to(v: Type, oid: pg.Oid) !pg.Datum {
+        _ = oid;
+        const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, v.addr, 0);
+        return try oidInputFunctionCall(pg.CIDROID, slice_z.ptr, -1);
+    }
+});
+
+// Calls the type's output function; returns a palloc'd slice in the current
+// memory context. No copy: the slice points directly at the palloc'd C string.
+fn oidOutputToSlice(d: pg.Datum, type_oid: pg.Oid) ![]const u8 {
+    var out_func: pg.Oid = pg.InvalidOid;
+    var is_varlena: bool = undefined;
+    pg.getTypeOutputInfo(type_oid, &out_func, &is_varlena);
+    const cstr = try err.wrap(pg.OidOutputFunctionCall, .{ out_func, d });
+    return std.mem.span(cstr);
+}
+
+// Calls the type's input function; returns the resulting Datum.
+fn oidInputFunctionCall(type_oid: pg.Oid, cstr: [*:0]u8, typmod: i32) !pg.Datum {
+    var in_func: pg.Oid = pg.InvalidOid;
+    var typioparam: pg.Oid = pg.InvalidOid;
+    pg.getTypeInputInfo(type_oid, &in_func, &typioparam);
+    return try err.wrap(pg.OidInputFunctionCall, .{ in_func, @as([*c]u8, cstr), typioparam, typmod });
+}
+
 pub const SliceU8Z = Conv(struct {
     pub const Type = [:0]const u8;
     pub const sql_name = "text";
@@ -532,6 +677,11 @@ pub fn typeOid(comptime T: type) pg.Oid {
         Timestamp => pg.TIMESTAMPOID,
         TimestampTz => pg.TIMESTAMPTZOID,
         pg.Interval => pg.INTERVALOID,
+        Json => pg.JSONOID,
+        Jsonb => pg.JSONBOID,
+        Numeric => pg.NUMERICOID,
+        Inet => pg.INETOID,
+        Cidr => pg.CIDROID,
         else => @compileError("pgzx.datum: no type OID for Zig type " ++ @typeName(T)),
     };
 }
@@ -721,8 +871,6 @@ fn arrayToDatum(comptime Elem: type, elem_oid: pg.Oid, values: []const Elem) !pg
     });
     return pg.PointerGetDatum(arr);
 }
-
-// TODO: conversion decorator for jsonb decoding/encoding types
 
 fn idDatum(d: pg.Datum) pg.Datum {
     return d;
@@ -1181,6 +1329,162 @@ pub const TestSuite_Datum = struct {
 
     /// Checks the uuid/bytea/date-time conversions against the server's own
     /// representation, in both directions.
+    pub fn testRangeRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(range.Int4Range, "SELECT '[1,10)'::int4range", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqual(@as(?i32, 1), v.lower);
+            try std.testing.expectEqual(@as(?i32, 10), v.upper);
+            try std.testing.expect(v.lower_inclusive);
+            try std.testing.expect(!v.upper_inclusive);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::int4range = '[1,10)'::int4range", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.INT4RANGEOID},
+                    .values = &.{try toNullableDatum(range.Int4Range{ .lower = 1, .upper = 10 })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+        {
+            var rows = try spi.queryTyped(NumRange, "SELECT '(1.5,2.50]'::numrange", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("1.5", v.value.lower.?);
+            try std.testing.expectEqualStrings("2.50", v.value.upper.?);
+            try std.testing.expect(!v.value.lower_inclusive);
+            try std.testing.expect(v.value.upper_inclusive);
+        }
+    }
+
+    pub fn testJsonRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(Json, "SELECT '{\"a\":1}'::json", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("{\"a\":1}", v.text);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::text = '{\"a\":1}'", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.JSONOID},
+                    .values = &.{try toNullableDatum(Json{ .text = "{\"a\":1}" })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+    }
+
+    pub fn testJsonbRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(Jsonb, "SELECT '{\"a\":1}'::jsonb", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("{\"a\": 1}", v.text);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::jsonb = '{\"a\":1}'::jsonb", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.JSONBOID},
+                    .values = &.{try toNullableDatum(Jsonb{ .text = "{\"a\":1}" })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+    }
+
+    pub fn testNumericRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(Numeric, "SELECT '3.14'::numeric", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("3.14", v.text);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::numeric = '3.14'::numeric", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.NUMERICOID},
+                    .values = &.{try toNullableDatum(Numeric{ .text = "3.14" })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+    }
+
+    pub fn testInetRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(Inet, "SELECT '192.168.1.1'::inet", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("192.168.1.1", v.addr);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::inet = '192.168.1.1'::inet", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.INETOID},
+                    .values = &.{try toNullableDatum(Inet{ .addr = "192.168.1.1" })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+    }
+
+    pub fn testCidrRoundTrip() !void {
+        const spi = @import("spi.zig");
+        try spi.connect();
+        defer spi.finish();
+
+        {
+            var rows = try spi.queryTyped(Cidr, "SELECT '192.168.1.0/24'::cidr", .{ .read_only = true });
+            defer rows.deinit();
+            const v = (try rows.next()).?;
+            try std.testing.expectEqualStrings("192.168.1.0/24", v.addr);
+        }
+        {
+            var rows = try spi.queryTyped(bool, "SELECT $1::cidr = '192.168.1.0/24'::cidr", .{
+                .read_only = true,
+                .args = .{
+                    .types = &.{pg.CIDROID},
+                    .values = &.{try toNullableDatum(Cidr{ .addr = "192.168.1.0/24" })},
+                },
+            });
+            defer rows.deinit();
+            try std.testing.expectEqual(true, (try rows.next()).?);
+        }
+    }
+
     pub fn testBuiltinTypesMatchServer() !void {
         const spi = @import("spi.zig");
         try spi.connect();
@@ -1245,3 +1549,56 @@ pub const TestSuite_Datum = struct {
         try std.testing.expectEqual(true, (try rows.next()).?);
     }
 };
+
+// ---------------------------------------------------------------------------
+// Range types. The integer ranges map to `range.Range(T)` directly. The
+// numeric and time ranges share one Zig type, so each SQL type gets a wrapper
+// with a `value` field. Converters go through the text form in range.zig.
+// ---------------------------------------------------------------------------
+
+/// `numrange`. Bounds keep the exact decimal text.
+pub const NumRange = struct {
+    value: range.TextRange,
+};
+
+/// `tsrange`. Bounds are the timestamp text.
+pub const TsRange = struct {
+    value: range.TextRange,
+};
+
+/// `tstzrange`. Bounds are the timestamptz text.
+pub const TstzRange = struct {
+    value: range.TextRange,
+};
+
+/// `daterange`. Bounds are the date text.
+pub const DateRange = struct {
+    value: range.TextRange,
+};
+
+fn rangeValueType(comptime R: type) type {
+    return if (@hasField(R, "value")) @FieldType(R, "value") else R;
+}
+
+fn RangeConv(comptime R: type, comptime oid: pg.Oid, comptime name: []const u8) type {
+    const Inner = rangeValueType(R);
+    const wrapped = @hasField(R, "value");
+
+    return Conv(struct {
+        pub const Type = R;
+        pub const sql_name = name;
+
+        pub fn from(d: pg.Datum, _: pg.Oid) !Type {
+            const text = try oidOutputToSlice(d, oid);
+            const parsed = try Inner.parse(mem.PGCurrentContextAllocator, text);
+            return if (wrapped) .{ .value = parsed } else parsed;
+        }
+
+        pub fn to(v: Type, _: pg.Oid) !pg.Datum {
+            const inner = if (wrapped) v.value else v;
+            const text = try inner.format(mem.PGCurrentContextAllocator);
+            const slice_z = try mem.PGCurrentContextAllocator.dupeSentinel(u8, text, 0);
+            return try oidInputFunctionCall(oid, slice_z.ptr, -1);
+        }
+    });
+}

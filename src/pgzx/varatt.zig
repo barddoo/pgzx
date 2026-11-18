@@ -4,13 +4,11 @@
 const pg = @import("pgzx_pgsys");
 const std = @import("std");
 
-// WARNING:
-// Taken from translated C code and mostly untested.
-// The zig compiler will not complain about errors if inline functions are not used.
-//
-// TODO:
-// We do not want to expose these directly, but we must make sure that we test
-// all variable conversions to make sure that code actually compiles.
+// Status: internal. Not re-exported from `pgzx`; `datum.zig` uses it for the
+// bytea converter. The setters and the bytea round trip are tested
+// (`TestSuite_Varatt`, `TestSuite_Datum`). Most other macros are only checked
+// by compilation: Zig does not report errors in an inline function that is
+// never called, so add a test before relying on one.
 
 pub const VARHDRSZ = pg.VARHDRSZ;
 pub const VARHDRSZ_SHORT = @sizeOf(varattrib_1b);

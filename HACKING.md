@@ -12,6 +12,7 @@ pgzx extension on your machine. It assumes you have cloned this repository.
 - [HACKING: local development guide](#hacking-local-development-guide)
   - [Table of contents](#table-of-contents)
   - [1. Prerequisites](#1-prerequisites)
+  - [1a. Without Nix — Docker / raw install](#1a-without-nix--docker--raw-install)
   - [2. Enter the development shell](#2-enter-the-development-shell)
   - [3. Create the local PostgreSQL installation](#3-create-the-local-postgresql-installation)
   - [4. Repository layout](#4-repository-layout)
@@ -43,13 +44,166 @@ pgzx extension on your machine. It assumes you have cloned this repository.
 - Optionally **direnv** to load the shell automatically.
 - Linux or macOS (x86_64 or aarch64).
 
-If you cannot or do not want to install Nix, there is a Docker based
-development shell:
+If you cannot or do not want to install Nix, see [§ 1a — Without Nix](#1a-without-nix-docker--raw-install) below.
+
+## 1a. Without Nix — Docker / raw install
+
+Two paths that need neither Nix nor a custom Docker image that bakes Nix in.
+
+### Option A — Docker (recommended for quick start)
+
+A self-contained image installs Zig and PostgreSQL directly:
 
 ```sh
-./dev/docker/build.sh   # builds the pgzx:latest image
-./dev/docker/run.sh     # enters a shell inside the container
+# Build the image (once; ~3 min on first build, cached after)
+docker build \
+  -f dev/docker/Dockerfile.standalone \
+  -t pgzx-standalone \
+  .
+
+# Or pick a PostgreSQL version:
+docker build \
+  --build-arg PG_MAJOR=16 \
+  --build-arg ZIG_VERSION=0.17.1 \
+  -f dev/docker/Dockerfile.standalone \
+  -t pgzx-standalone:pg16 \
+  .
 ```
+
+Then drop into a shell with the repo mounted live:
+
+```sh
+docker run -it --rm -v "$PWD:/workspace" pgzx-standalone
+```
+
+Or use Compose (mounts the repo automatically):
+
+```sh
+docker compose -f dev/docker/docker-compose.yml run --rm dev
+```
+
+Inside the container the helper scripts (`pglocal`, `pginit`, `pgstart`, …)
+are on `PATH` and you follow the same workflow as §§ 3–10 below, with one
+difference: `pglocal` is not needed because the PostgreSQL installation is
+already in `/usr/lib/postgresql/<PG_MAJOR>`. Instead, set `PG_HOME` to point
+directly at it:
+
+```sh
+# Inside the container — run once
+export PG_MAJOR=18   # or whichever version you built the image with
+export PG_HOME=/usr/lib/postgresql/${PG_MAJOR}
+export PATH="$PG_HOME/bin:$PATH"
+export PGHOST=/run/postgresql
+
+# Initialise and start the server
+pginit
+pgstart
+psql -U postgres -c 'select version()'
+```
+
+Then build and install extensions the normal way:
+
+```sh
+cd examples/char_count_zig
+zig build -p "$PG_HOME"
+```
+
+> **Note:** The container runs as a non-root `dev` user. `/run/postgresql` is
+> pre-created and owned by that user, so the Unix socket works without sudo.
+
+### Option B — Raw install (Linux / macOS)
+
+#### Install Zig
+
+Download the latest stable release from [ziglang.org/download](https://ziglang.org/download/)
+and add it to `PATH`. pgzx requires **Zig 0.17 or newer**.
+
+```sh
+# Example — Linux x86_64
+ZIG_VERSION=0.17.1
+# URL format as of 0.17+: zig-<arch>-linux-<version>
+curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+     -o /tmp/zig.tar.xz
+sudo tar -C /usr/local -xJf /tmp/zig.tar.xz
+sudo ln -s "/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+zig version   # should print 0.17.1
+```
+
+macOS: `brew install zig` installs the current stable release.
+
+#### Install PostgreSQL and dev headers
+
+**Ubuntu / Debian**
+
+```sh
+PG_MAJOR=18   # or 15 / 16 / 17
+# Add the PGDG apt repository
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
+  https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt-get update
+sudo apt-get install -y \
+    postgresql-${PG_MAJOR} \
+    postgresql-server-dev-${PG_MAJOR} \
+    libssl-dev libkrb5-dev
+```
+
+**Fedora / RHEL**
+
+```sh
+sudo dnf install -y postgresql-server postgresql-devel openssl-devel krb5-devel
+```
+
+**macOS (Homebrew)**
+
+```sh
+brew install postgresql@18   # or @15 / @16 / @17
+brew link postgresql@18 --force
+```
+
+The brew formula includes dev headers; no separate `*-dev` package is needed.
+
+#### Set environment variables
+
+Add these to your shell profile (`.bashrc`, `.zshrc`, etc.):
+
+```sh
+# Adjust PG_MAJOR and the prefix to match your install
+export PG_MAJOR=18
+
+# Linux PGDG
+export PG_HOME=/usr/lib/postgresql/${PG_MAJOR}
+export PATH="$PG_HOME/bin:$PATH"
+export PGHOST=/run/postgresql   # or wherever the socket lives
+
+# macOS Homebrew
+# export PG_HOME=$(brew --prefix "postgresql@${PG_MAJOR}")
+# export PATH="$PG_HOME/bin:$PATH"
+# export PGHOST=/tmp   # Homebrew uses /tmp for sockets
+
+# Repo helpers (from the pgzx checkout)
+export PRJ_ROOT=/path/to/pgzx
+export PATH="$PRJ_ROOT/dev/bin:$PATH"
+
+# Shared Zig build cache (optional but speeds up repeat builds)
+export ZIG_LOCAL_CACHE_DIR="$HOME/.cache/zig-pgzx"
+```
+
+#### Initialise and start the server
+
+```sh
+pginit    # initdb + create 'postgres' superuser; run once
+pgstart   # start the server
+pgstatus  # check it's running
+psql -U postgres -c 'select version()'
+```
+
+> On Linux the socket directory `/run/postgresql` must be writable by your
+> user, or set `PGHOST` to a directory you own (e.g. `/tmp`).
+
+After that, build and test extensions exactly as described in §§ 6–10.
 
 ## 2. Enter the development shell
 

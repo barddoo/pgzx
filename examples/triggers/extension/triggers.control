@@ -1,0 +1,6 @@
+comment = 'pgzx: Triggers example extension'
+default_version = '0.1'
+module_pathname = '$libdir/triggers'
+relocatable = false
+superuser = false
+schema = 'triggers'

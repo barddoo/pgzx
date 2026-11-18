@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+# Nix-free development image for pgzx.
+#
+# Installs Zig and PostgreSQL (with dev headers) directly without Nix.
+# Supports PostgreSQL 15–18 (default: 18).
+#
+# Build:
+#   docker build -f dev/docker/Dockerfile.standalone -t pgzx-standalone .
+#   docker build --build-arg PG_MAJOR=16 -f dev/docker/Dockerfile.standalone -t pgzx-standalone:pg16 .
+#
+# Run (mounts repo read-write):
+#   docker run -it --rm -v "$PWD:/workspace" pgzx-standalone
+
+ARG PG_MAJOR=18
+ARG ZIG_VERSION=0.17.1
+
+FROM debian:trixie-slim
+
+LABEL org.opencontainers.image.source="https://github.com/xataio/pgzx"
+LABEL org.opencontainers.image.description="pgzx development environment (Zig + PostgreSQL, no Nix)"
+
+ARG PG_MAJOR
+ARG ZIG_VERSION
+# ZSF minisign public key for Zig 0.17.1 — https://ziglang.org/download/0.17.1/release-notes.html
+ARG ZIG_MINISIGN_PUBKEY=RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Base packages
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates gnupg \
+        libssl-dev libkrb5-dev \
+        xz-utils git sudo
+
+# Add PostgreSQL apt repo (separate step so a transient network error only retries this layer)
+RUN curl -fsSL --retry 5 --retry-delay 3 https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+         | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
+         https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+         > /etc/apt/sources.list.d/pgdg.list
+
+# Install PostgreSQL server + dev headers
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        postgresql-${PG_MAJOR} \
+        postgresql-server-dev-${PG_MAJOR}
+
+# Install minisign (not in Ubuntu 24.04 main; grab the upstream static binary)
+ARG MINISIGN_VERSION=0.11
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then MS_ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then MS_ARCH="aarch64"; \
+    else echo "unsupported arch: $ARCH" && exit 1; fi && \
+    curl -fsSL --retry 3 \
+         "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz" \
+         -o /tmp/minisign.tar.gz && \
+    tar -xzf /tmp/minisign.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/minisign-linux/${MS_ARCH}/minisign" /usr/local/bin/minisign && \
+    rm -rf /tmp/minisign.tar.gz /tmp/minisign-linux
+
+# Install Zig — verified against the ZSF minisign key, tries community mirrors first
+COPY --link dev/docker/install-zig.sh /usr/local/bin/install-zig.sh
+RUN install-zig.sh "${ZIG_VERSION}" "${ZIG_MINISIGN_PUBKEY}"
+
+# Non-root user
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+RUN groupadd --gid ${USER_GID} ${USERNAME} && \
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} && \
+    echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME}
+
+# PostgreSQL socket directory writable by dev user
+RUN mkdir -p /run/postgresql && chown ${USER_UID}:${USER_GID} /run/postgresql
+
+USER ${USERNAME}
+
+# Shared Zig build cache so translate-c of PG headers happens once
+ENV ZIG_LOCAL_CACHE_DIR=/home/${USERNAME}/.cache/zig-pgzx
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]

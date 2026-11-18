@@ -3,6 +3,7 @@ const std = @import("std");
 const pg = @import("pgzx_pgsys");
 
 const intr = @import("interrupts.zig");
+const latch = @import("latch.zig");
 const elog = @import("elog.zig");
 const err = @import("err.zig");
 
@@ -437,12 +438,12 @@ pub const Conn = struct {
                 break;
             }
 
-            const rc = pg.WaitLatchOrSocket(pg.MyLatch, wait_flag, self.socket(), 0, pg.PG_WAIT_EXTENSION);
-            if (checkFlag(pg.WL_POSTMASTER_DEATH, rc)) {
+            const r = latch.waitOrSocket(latch.my(), self.socket(), wait_flag, .{});
+            if (r.postmaster_died) {
                 return Error.PostmasterDied;
             }
-            if (checkFlag(pg.WL_LATCH_SET, rc)) {
-                pg.ResetLatch(pg.MyLatch);
+            if (r.latch_set) {
+                latch.reset(latch.my());
                 try intr.CheckForInterrupts();
             }
         }
@@ -873,10 +874,6 @@ pub const FieldDescription = struct {
         return @intCast(pg.PQfsize(self.result.result, @intCast(self.idx)));
     }
 };
-
-fn checkFlag(comptime pattern: anytype, value: @TypeOf(pattern)) bool {
-    return (value & pattern) == pattern;
-}
 
 fn pqError(src: std.builtin.SourceLocation, conn: ?*pg.PGconn) error{PGErrorStack}!void {
     const rawerr = pg.PQerrorMessage(conn);

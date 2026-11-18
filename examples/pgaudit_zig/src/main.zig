@@ -6,9 +6,28 @@ comptime {
     pgzx.fmgr.PG_MODULE_MAGIC();
 }
 
-var prev_ExecutorStart_hook: pg.ExecutorStart_hook_type = null;
-var prev_ExecutorFinish_hook: pg.ExecutorFinish_hook_type = null;
-var prev_ExecutorCheckPerms_hook: pg.ExecutorCheckPerms_hook_type = null;
+const executor_start = pgzx.hooks.Hook(&pg.ExecutorStart_hook, pg.standard_ExecutorStart);
+const executor_finish = pgzx.hooks.Hook(&pg.ExecutorFinish_hook, pg.standard_ExecutorFinish);
+// ExecCheckPermissions() calls this hook before its own checks, and it returns
+// early only when the hook denies. Calling ExecCheckPermissions from here would
+// re-enter the hook, so the fallback is "no objection".
+fn checkPermsAllow(rangeTables: [*c]pg.List, rtePermInfos: [*c]pg.List, violation: bool) callconv(.c) bool {
+    _ = rangeTables;
+    _ = rtePermInfos;
+    _ = violation;
+    return true;
+}
+
+fn checkPermsAllowPg15(rangeTables: [*c]pg.List, violation: bool) callconv(.c) bool {
+    _ = rangeTables;
+    _ = violation;
+    return true;
+}
+
+const check_perms = if (pg.PG_VERSION_NUM >= 160000)
+    pgzx.hooks.Hook(&pg.ExecutorCheckPerms_hook, checkPermsAllow)
+else
+    pgzx.hooks.Hook(&pg.ExecutorCheckPerms_hook, checkPermsAllowPg15);
 
 pub const std_options = std.Options{
     .log_level = .debug,
@@ -73,17 +92,13 @@ pub export fn _PG_init() void {
 
     settings.register();
 
-    prev_ExecutorStart_hook = pg.ExecutorStart_hook;
-    pg.ExecutorStart_hook = pgaudit_zig_ExecutorStart_hook;
-
-    prev_ExecutorFinish_hook = pg.ExecutorFinish_hook;
-    pg.ExecutorFinish_hook = pgaudit_zig_ExecutorFinish_hook;
-
-    prev_ExecutorCheckPerms_hook = pg.ExecutorCheckPerms_hook;
-    pg.ExecutorCheckPerms_hook = if (pg.PG_VERSION_NUM >= 160000)
-        pgaudit_zig_ExecutorCheckPerms_hook
-    else
-        pgaudit_zig_ExecutorCheckPerms_hook_pg15;
+    executor_start.install(pgaudit_zig_ExecutorStart_hook);
+    executor_finish.install(pgaudit_zig_ExecutorFinish_hook);
+    if (pg.PG_VERSION_NUM >= 160000) {
+        check_perms.install(pgaudit_zig_ExecutorCheckPerms_hook);
+    } else {
+        check_perms.install(pgaudit_zig_ExecutorCheckPerms_hook_pg15);
+    }
 
     std.log.debug("pgaudit_zig: hooks installed\n", .{});
 }
@@ -115,23 +130,19 @@ fn executorStartHook(queryDesc: [*c]pg.QueryDesc, eflags: c_int) !void {
         .memctx = memctx,
     };
 
+    // The event's own context runs this callback when it is deleted. That also
+    // covers an error inside the standard hook below, which never reaches the
+    // code after it and would otherwise leave the event in the list.
+    try memctx.registerAllocResetCallback(event, pgaudit_zig_MemoryContextCallback);
+
     var audit_list = try getAuditList();
     try audit_list.append(global_memctx.allocator(), event);
 
-    if (prev_ExecutorStart_hook) |hook| {
-        hook(queryDesc, eflags);
-    } else {
-        // we still need to call the standard hook
-        pg.standard_ExecutorStart(queryDesc, eflags);
-    }
+    executor_start.callNext(.{ queryDesc, eflags });
 
     // reading queryDesc.*.estate.*.es_query_cxt needs to happen *after* calling the standard hook.
     // However, we need the event in the list before calling the standard hook, because it calls the CheckPerms hook.
     event.queryContext = queryDesc.*.estate.*.es_query_cxt;
-    try memctx.registerAllocResetCallback(
-        queryDesc.*.estate.*.es_query_cxt,
-        pgaudit_zig_MemoryContextCallback,
-    );
 }
 
 fn pgaudit_zig_ExecutorStart_hook(queryDesc: [*c]pg.QueryDesc, eflags: c_int) callconv(.c) void {
@@ -142,7 +153,7 @@ fn pgaudit_zig_ExecutorStart_hook(queryDesc: [*c]pg.QueryDesc, eflags: c_int) ca
     };
 }
 
-fn executorCheckPermsHook(rangeTables: [*c]pg.List, violation: bool) error{ OutOfMemory, EventNotFound, PGErrorStack }!bool {
+fn executorCheckPermsHook(rangeTables: [*c]pg.List, violation: bool) error{ OutOfMemory, EventNotFound, PGErrorStack }!void {
     _ = violation;
 
     const list = try getAuditList();
@@ -182,34 +193,36 @@ fn executorCheckPermsHook(rangeTables: [*c]pg.List, violation: bool) error{ OutO
     } else {
         return errctx.errorValue();
     }
-
-    return true;
 }
 
-fn executorCheckPermsHookImpl(rangeTables: [*c]pg.List, violation: bool) bool {
-    return executorCheckPermsHook(rangeTables, violation) catch |err| {
+fn executorCheckPermsHookImpl(rangeTables: [*c]pg.List, violation: bool) void {
+    executorCheckPermsHook(rangeTables, violation) catch |err| {
         // Forward reported errors to the postgres error stack.
         pgzx.elog.throwAsPostgresError(@src(), err);
-        unreachable;
     };
 }
 
 // ExecutorCheckPerms_hook gained the rtePermInfos argument in PG16.
+// Audit first, so denied attempts are still recorded, then let the standard
+// permission check decide.
 pub fn pgaudit_zig_ExecutorCheckPerms_hook(rangeTables: [*c]pg.List, rtePermInfos: [*c]pg.List, violation: bool) callconv(.c) bool {
     std.log.debug("pgaudit_zig: ExecutorCheckPerms_hook\n", .{});
-    _ = rtePermInfos;
 
-    return executorCheckPermsHookImpl(rangeTables, violation);
+    executorCheckPermsHookImpl(rangeTables, violation);
+    return check_perms.callNext(.{ rangeTables, rtePermInfos, violation });
 }
 
 pub fn pgaudit_zig_ExecutorCheckPerms_hook_pg15(rangeTables: [*c]pg.List, violation: bool) callconv(.c) bool {
     std.log.debug("pgaudit_zig: ExecutorCheckPerms_hook\n", .{});
 
-    return executorCheckPermsHookImpl(rangeTables, violation);
+    executorCheckPermsHookImpl(rangeTables, violation);
+    return check_perms.callNext(.{ rangeTables, violation });
 }
 
 fn pgaudit_zig_ExecutorFinish_hook(queryDesc: [*c]pg.QueryDesc) callconv(.c) void {
     std.log.debug("pgaudit_zig: ExecutorFinish_hook\n", .{});
+
+    executor_finish.callNext(.{queryDesc});
 
     const queryContext = queryDesc.*.estate.*.es_query_cxt;
 
@@ -249,18 +262,19 @@ fn freeEvent(event: *AuditEvent) void {
     memctx.deinit();
 }
 
-fn pgaudit_zig_MemoryContextCallback(memctx: pg.MemoryContext) void {
+// Runs while the event's context is being deleted, so the context must not be
+// deleted again here. Removing the event from the list is enough: freeEvent has
+// already done its part when the event was popped by ExecutorFinish.
+fn pgaudit_zig_MemoryContextCallback(event: *AuditEvent) void {
     std.log.debug("pgaudit_zig: MemoryContextCallback\n", .{});
 
     const list = getAuditList() catch return;
-    const event = popEvent(list, memctx) catch |err| {
-        if (err == error.EventNotFound) {
+    for (list.items, 0..) |item, i| {
+        if (item == event) {
+            _ = list.swapRemove(i);
             return;
         }
-        std.log.err("pgaudit_zig: failed to pop event in MemoryContextCallback: {}\n", .{err});
-        return;
-    };
-    freeEvent(event);
+    }
 }
 
 fn eventToJSON(event: *AuditEvent, writer: *std.Io.Writer) !void {

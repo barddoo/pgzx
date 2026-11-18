@@ -1,5 +1,6 @@
 const std = @import("std");
 const meta = @import("pgzx/meta.zig");
+const range = @import("pgzx/range.zig");
 
 /// Runs every `test*` function declared in `S`.
 ///
@@ -16,4 +17,8 @@ fn runSuite(comptime S: type) !void {
 
 test "meta" {
     try runSuite(meta.TestSuite_Meta);
+}
+
+test "range" {
+    try runSuite(range.TestSuite_Range);
 }

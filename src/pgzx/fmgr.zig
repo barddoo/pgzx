@@ -8,6 +8,7 @@ const heap_tuple = @import("heap_tuple.zig");
 const mem = @import("mem.zig");
 const meta = @import("meta.zig");
 const srf = @import("srf.zig");
+const trigger = @import("trigger.zig");
 
 pub const args = @import("fmgr/args.zig");
 pub const varatt = pg.varatt;
@@ -107,6 +108,47 @@ inline fn genFnCall(comptime f: anytype) type {
             return pgCall(@src(), function, fcinfo);
         }
     };
+}
+
+/// Register a trigger function. The Zig callback must have signature:
+///
+///   fn(tg: trigger.TriggerData) !pg.HeapTuple
+///
+/// For BEFORE ROW triggers, return the tuple to write (usually
+/// `tg.getNew().?.tuple` possibly modified) or a null `pg.HeapTuple` to
+/// suppress the operation. AFTER and statement-level trigger return values are
+/// ignored by PostgreSQL.
+///
+/// Like `PG_FUNCTION_V1`, this exports the `pg_finfo_*` ABI symbol.
+pub inline fn PG_TRIGGER_V1(comptime name: []const u8, comptime callback: anytype) void {
+    PG_FUNCTION_INFO_V1(name);
+    const reg = genTriggerCall(callback);
+    @export(&reg.call, .{ .name = name });
+}
+
+inline fn genTriggerCall(comptime f: anytype) type {
+    return struct {
+        const function: @TypeOf(f) = f;
+        fn call(fcinfo: pg.FunctionCallInfo) callconv(.c) pg.Datum {
+            return pgTriggerCall(@src(), function, fcinfo);
+        }
+    };
+}
+
+pub inline fn pgTriggerCall(
+    comptime src: std.builtin.SourceLocation,
+    comptime impl: anytype,
+    fcinfo: pg.FunctionCallInfo,
+) pg.Datum {
+    const tg_data = trigger.TriggerData.fromFcinfo(fcinfo) catch |e| elog.throwAsPostgresError(src, e);
+    const result: pg.HeapTuple = switch (@typeInfo(meta.fnReturnType(@TypeOf(impl)))) {
+        .error_union => impl(tg_data) catch |e| elog.throwAsPostgresError(src, e),
+        else => impl(tg_data),
+    };
+    if (result != null) {
+        return pg.PointerGetDatum(result);
+    }
+    return 0;
 }
 
 pub const Arg = args.Arg;
