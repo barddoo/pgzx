@@ -73,8 +73,8 @@ pub fn build(b: *std.Build) void {
             .cwd_relative = "/usr/include/aarch64-linux-gnu",
         });
 
-        // Extra host include dirs exported by the dev shell, for platforms where
-        // openssl/krb5 headers are not in /usr/include (e.g. the nix store on
+        // Extra host include dirs exported by the environment, for platforms
+        // where openssl/krb5 headers are not in /usr/include (e.g. Homebrew on
         // macOS). Colon-separated list, set as PGZX_C_INCLUDE_DIRS.
         if (b.graph.environ_map.get("PGZX_C_INCLUDE_DIRS")) |dirs| {
             var it = std.mem.tokenizeScalar(u8, dirs, ':');
@@ -250,7 +250,8 @@ pub fn build(b: *std.Build) void {
         const files = b.addWriteFiles();
         const meta = files.add("META.json", meta_json);
 
-        const archive = b.addSystemCommand(&.{ "sh", "-c",
+        const archive = b.addSystemCommand(&.{
+            "sh", "-c",
             \\set -e
             \\stage=$(mktemp -d)
             \\mkdir "$stage/$2"
@@ -258,7 +259,9 @@ pub fn build(b: *std.Build) void {
             \\cp "$3" "$stage/$2/META.json"
             \\tar -C "$stage" -czf "$1" "$2"
             \\rm -rf "$stage"
-        , "sh" });
+            ,
+            "sh",
+        });
         archive.setCwd(b.path(""));
         const tarball = archive.addOutputFileArg(b.fmt("{s}.tar.gz", .{dir_name}));
         archive.addArg(dir_name);
@@ -326,5 +329,30 @@ pub fn build(b: *std.Build) void {
 
         psql_run_tests.step.dependOn(test_ext.step);
         steps.unit.dependOn(&psql_run_tests.step);
+    }
+
+    // The pgzx command line tool. Std-only: it does not depend on PostgreSQL
+    // headers, so it can be cross-compiled for release binaries.
+    {
+        const cli_module = b.createModule(.{
+            .root_source_file = b.path("src/cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const cli = b.addExecutable(.{
+            .name = "pgzx",
+            .root_module = cli_module,
+        });
+        const install_cli = b.addInstallArtifact(cli, .{});
+        const cli_step = b.step("cli", "Build the pgzx command");
+        cli_step.dependOn(&install_cli.step);
+
+        // Smoke-test the binary; the logic itself is unit-tested in src/cli.
+        const run_help = b.addRunArtifact(cli);
+        run_help.addArg("help");
+        const run_version = b.addRunArtifact(cli);
+        run_version.addArg("version");
+        steps.test_pure.dependOn(&run_help.step);
+        steps.test_pure.dependOn(&run_version.step);
     }
 }

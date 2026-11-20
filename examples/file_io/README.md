@@ -68,9 +68,10 @@ servers the unit test skips it and `pgzx.fd` remains fully usable.
 
 ## Running
 
-From the pgzx development shell (see the top-level README):
+From a shell with the pgzx environment loaded (see the top-level README):
 
 ```sh
+eval "$(pgzx env)"
 cd examples/file_io
 zig build -freference-trace -p "$PG_HOME"   # build and install
 zig build -p "$PG_HOME" unit                # in-server unit tests

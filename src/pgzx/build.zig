@@ -538,10 +538,10 @@ pub fn getExtensionDir(b: *Build) []const u8 {
 pub fn getPGRegressPath(b: *Build) []const u8 {
     b.paths.pg_regress_path = b.paths.pg_regress_path orelse blk: {
         // `pg_config --pkglibdir` may point at a different installation root
-        // than the one shipping the pgxs tooling (e.g. Nix splits the -dev
-        // output out). `pg_config --pgxs` always points at the same tree as
-        // pg_regress, i.e. <prefix>/lib/pgxs/src/makefiles/pgxs.mk, so derive
-        // the tool path from it instead.
+        // than the one shipping the pgxs tooling (e.g. a split -dev package).
+        // `pg_config --pgxs` always points at the same tree as pg_regress,
+        // i.e. <prefix>/lib/pgxs/src/makefiles/pgxs.mk, so derive the tool
+        // path from it instead.
         const pgxs = b.runPGConfig("--pgxs");
         const pgxs_src = std.fs.path.dirname(std.fs.path.dirname(pgxs) orelse pgxs) orelse pgxs;
         break :blk b.std_build.pathJoin(&[_][]const u8{ pgxs_src, "test/regress/pg_regress" });
@@ -629,9 +629,8 @@ pub fn addInstallExtensionLibArtifact(b: *Build, artifact: *Step.Compile, name: 
     // TODO: resolve paths to ensures they are canonicalized.
 
     // Normally it is expected that the package libdir is a subdirectory of the pg_home.
-    // Unfortunately in Nix the path can be reconfigured using an environment
-    // variable, in which case the libdir is no subfolder of the Postgres
-    // installation.
+    // Installations that reconfigure the libdir (some distro and Homebrew
+    // layouts) may report it outside the prefix.
     //
     // If that is the case we only copy the shared library to the libdir if the
     // installation prefix is indeed the local postgres installation path.
@@ -856,9 +855,30 @@ pub fn runPGConfig(b: *Build, question: []const u8) []const u8 {
 pub fn getPGHome(b: *Build) []const u8 {
     b.paths.pg_home = b.paths.pg_home orelse blk: {
         const bindir = b.getBinDir();
-        break :blk std.fs.path.dirname(bindir);
+        const parent = std.fs.path.dirname(bindir) orelse bindir;
+        const pkglibdir = b.getPackageLibDir();
+        // Homebrew reports `--bindir` from the Cellar but `--pkglibdir` and
+        // `--sharedir` from the Homebrew prefix. When the library directory is
+        // outside the binary directory, install relative to their common
+        // ancestor instead (e.g. /opt/homebrew).
+        break :blk if (std.mem.startsWith(u8, pkglibdir, parent))
+            parent
+        else
+            commonAncestor(parent, pkglibdir);
     };
     return b.paths.pg_home.?;
+}
+
+fn commonAncestor(a: []const u8, b: []const u8) []const u8 {
+    var i: usize = 0;
+    var last_sep: usize = 0;
+    const n = @min(a.len, b.len);
+    while (i < n and a[i] == b[i]) : (i += 1) {
+        if (a[i] == '/') last_sep = i;
+    }
+    if (i == a.len and (i == b.len or b[i] == '/')) return a;
+    if (i == b.len and (i == a.len or a[i] == '/')) return b;
+    return if (last_sep == 0) "/" else a[0..last_sep];
 }
 
 fn findPGConfig(b: *Build) []const u8 {

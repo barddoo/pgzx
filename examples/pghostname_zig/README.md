@@ -16,7 +16,7 @@ SELECT pghostname_zig();
 
 ## Running
 
-To test the extension, follow first the development shell instructions in the [pgzx README][pgzx_Development]. The following commands assume you are in the nix shell (run `nix develop`).
+To test the extension, follow the setup instructions in the [pgzx README][pgzx_Development] and load the environment with `eval "$(pgzx env)"`.
 
 Run in the folder of the extension:
 

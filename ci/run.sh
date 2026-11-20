@@ -7,11 +7,23 @@
 # build phase, so a learning example cannot gate the suite. Prints "Success!"
 # on completion.
 #
-# Requires the development shell (`nix develop`), which provides the `pgenv`,
-# `pgstart`, `pgstop` and `pgstatus` helpers and the `pg_config` dispatcher.
+# Requires Zig and a PostgreSQL installation with development headers. The
+# `pgzx` command is built from src/cli and derives the environment from
+# `PG_CONFIG` (or the `pg_config` on PATH).
 
 #set -x
 set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+if [ ! -x "$root/zig-out/bin/pgzx" ]; then
+	zig build cli
+fi
+export PATH="$root/zig-out/bin:$PATH"
+eval "$(pgzx env)"
+# pgzx init creates the default cluster under PGZX_CLUSTER_DIR; start/status
+# recompute the same paths from the exported environment.
+PG_CLUSTER_LOG_FILE=$PGZX_CLUSTER_DIR/postgres/log/server.log
 
 examples=(./examples/*)
 
@@ -25,7 +37,7 @@ fail() {
 
 cleanup() {
 	if [ "$started_server" = 1 ]; then
-		pgstop 2>/dev/null || true
+		pgzx stop 2>/dev/null || true
 	fi
 	if [ -n "$log_dir" ]; then
 		rm -rf "$log_dir"
@@ -71,7 +83,6 @@ dump_server_log() {
 }
 
 echo "Build and install extension"
-eval "$(pgenv)"
 
 log_init_size=0
 if [ -f "$PG_CLUSTER_LOG_FILE" ]; then
@@ -102,10 +113,10 @@ for i in "${!build_jobs[@]}"; do
 done
 
 echo -e "\n\nStart PostgreSQL"
-# pgstart fails if the server is already running, so check first. Only stop
+# pgzx start fails if the server is already running, so check first. Only stop
 # the server on exit if this script started it.
-if ! pgstatus >/dev/null 2>&1; then
-	pgstart || fail "Failed to start PostgreSQL"
+if ! pgzx status >/dev/null 2>&1; then
+	pgzx start || fail "Failed to start PostgreSQL"
 	started_server=1
 fi
 

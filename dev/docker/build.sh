@@ -11,7 +11,7 @@ SCRIPT_DIR=$(
 	pwd
 )
 PRJ_ROOT=${PRJ_ROOT:-$(realpath "$SCRIPT_DIR/../..")}
-DOCKERFILE=${DOCKERFILE:-"$PRJ_ROOT/dev/docker/Dockerfile"}
+DOCKERFILE=${DOCKERFILE:-"$PRJ_ROOT/dev/docker/Dockerfile.standalone"}
 
 cd "$PRJ_ROOT"
 docker build -t "$IMAGE_NAME:$IMAGE_TAG" -f "$DOCKERFILE" .

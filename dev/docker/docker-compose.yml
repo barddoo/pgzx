@@ -1,4 +1,4 @@
-# One-command dev environment (no Nix).
+# One-command dev environment.
 #
 # Usage:
 #   docker compose run --rm dev        # interactive shell
@@ -14,6 +14,7 @@ services:
       dockerfile: dev/docker/Dockerfile.standalone
       args:
         PG_MAJOR: "18"
+        PG_VERSION: "18.7-1.pgdg13+5"
         ZIG_VERSION: "0.17.1"
     image: pgzx-standalone:pg18
     volumes:

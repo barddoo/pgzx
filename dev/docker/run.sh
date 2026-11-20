@@ -13,7 +13,7 @@ SCRIPT_DIR=$(
 PRJ_ROOT=${PRJ_ROOT:-$(realpath "$SCRIPT_DIR/../..")}
 
 docker run -i -t --rm \
-	-v "$PRJ_ROOT:/home/dev/workdir" \
-	-w /home/dev/workdir \
+	-v "$PRJ_ROOT:/workspace" \
+	-w /workspace \
 	"$IMAGE_NAME:$IMAGE_TAG" \
 	"$@"

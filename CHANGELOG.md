@@ -30,8 +30,20 @@ All notable changes to pgzx are recorded here. The format follows
   `tstzrange` and `daterange` use wrapper types with a `value` field.
 - `zig build package`: writes `pgzx-<version>.tar.gz` and PGXN `META.json` to
   `zig-out/package/`.
-- `dev/bin/pgzx-new <name> [dir]`: scaffolds a new extension from the init
-  template without Nix.
+- `pgzx` command implemented as a Zig binary (`src/cli`, built with
+  `zig build cli`): `new`, `env`, `init`, `start`, `stop`, `status`, `doctor`,
+  `fingerprint` and `version`. Works from a checkout and from an installed
+  bundle; `pgzx new` supports `--template`, `--pgzx-ref` and `--no-fetch`, and
+  pins the dependency URL and hash.
+- `templates/default`: project template with `Makefile` and `.envrc`.
+- `install.sh` and `tools/build-dist.sh`: per-target release bundles
+  (`pgzx-cli-<tag>-<target>.tar.gz`, `pgzx-template-<tag>.tar.gz`,
+  `SHA256SUMS`) with the CLI cross-compiled for macOS (aarch64/x86_64) and Linux
+  (aarch64/x86_64, static musl), and the templates stamped to the release tag
+  and package hash.
+- `dev/docker/install-zig.sh` installs Zig on macOS as well as Linux, falls back
+  to the `index.json` checksum when minisign is unavailable, and accepts an
+  install prefix.
 - Examples: `examples/aggregate` (`geomean`). `examples/bgworker` now includes a
   dynamic worker round trip and a value passed through a DSM segment.
 
@@ -45,9 +57,23 @@ All notable changes to pgzx are recorded here. The format follows
   processing. The permission hook still allows and leaves the checks to
   PostgreSQL.
 - `pgzx.varatt` is documented as internal, with an accurate test status.
+- Cluster state honours `PGZX_CLUSTER_DIR` and `PG_SOCKET_DIR`, so it no longer
+  has to live inside the PostgreSQL installation prefix.
+
+### Removed
+
+- The shell implementation of the CLI and its helpers: `dev/bin/pgzx`,
+  `pgzx-new`, `pginit`, `pgenv`, `pgstart`, `pgstop` and `pgstatus`.
+  `pgzx` is now a single Zig binary.
+- `dev/bin/pglocal` and `dev/bin/pguse`; the cluster now lives in
+  `<project>/out/pg` and `PG_CONFIG` selects the PostgreSQL version.
+- `tools/check-templates.sh`; there is a single template.
 
 ### Fixed
 
+- Cluster creation no longer requires a writable PostgreSQL prefix: `pgzx init`
+  writes to `PGZX_CLUSTER_DIR` and prints the fix instead of failing with a bare
+  permission error. Also fixes the Docker workflow on `postgresql-server-dev`.
 - `datum`: `dupeZ` calls replaced with `dupeSentinel`, which Zig 0.17 provides.
 - `datum`: the `json` round-trip test expected `jsonb` formatting. The `json`
   type stores its input text, so the expected value is `{"a":1}`.

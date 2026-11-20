@@ -27,63 +27,214 @@ jobs:
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-      - name: Run commit checks
-        run: nix develop --command -- pre-commit run --all-files --color always
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Install linters
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck shfmt
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin actionlint
+      - name: Run linters
+        run: |
+          shellcheck ci/*.sh install.sh dev/bin/* tools/*.sh
+          shfmt -d -i 0 -ci -s ci install.sh dev/bin tools
+          actionlint .github/workflows/*.yaml
 
   test:
-    name: Test (${{ matrix.os }}, PostgreSQL ${{ matrix.pg }})
-    runs-on: ${{ matrix.os }}
+    name: Test (PostgreSQL ${{ matrix.pg }})
+    runs-on: ubuntu-24.04
     environment: production
     strategy:
       # One failing PostgreSQL version must not hide the state of the others.
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-24.04, pg: "15"}
-          - {os: ubuntu-24.04, pg: "16"}
-          - {os: ubuntu-24.04, pg: "17"}
-          - {os: ubuntu-24.04, pg: "18"}
+        pg: ["15", "16", "17", "18"]
     env:
-      # Selects the PostgreSQL version for the dev shell's pg_config.
-      PG_VERSION: ${{ matrix.pg }}
+      PG_CONFIG: /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+      - name: Install PostgreSQL ${{ matrix.pg }}
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            "postgresql-${{ matrix.pg }}" "postgresql-server-dev-${{ matrix.pg }}" \
+            libssl-dev libkrb5-dev
+      - name: Let the runner install extensions
+        run: |
+          sudo chown -R "$USER" \
+            "$("$PG_CONFIG" --pkglibdir)" \
+            "$("$PG_CONFIG" --sharedir)/extension"
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
       - name: Cache Zig cache
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/zig-pgzx
-            ~/.cache/zig
-          key: zig-${{ runner.os }}-pg${{ matrix.pg }}-${{ hashFiles('flake.lock', 'build.zig.zon', 'src/pgzx/c/include/*.h', 'src/pgzx/c/*.c') }}
+          path: ~/.cache/zig-pgzx
+          key: zig-${{ runner.os }}-pg${{ matrix.pg }}-${{ hashFiles('build.zig.zon', 'src/pgzx/c/include/*.h', 'src/pgzx/c/*.c') }}
           restore-keys: |
             zig-${{ runner.os }}-pg${{ matrix.pg }}-
-      - name: Init Nix environment
-        run: nix develop --command -- echo "Done"
-      - name: Allow the default socket directory
-        if: runner.os == 'Linux'
-        run: sudo install -d -o "$USER" /run/postgresql
-      - name: Create local PostgreSQL ${{ matrix.pg }} installation
-        run: |
-          nix develop --command -- pguse "$PG_VERSION"
-          nix develop --command -- ./ci/setup.sh
+      - name: Create local PostgreSQL installation
+        run: ./ci/setup.sh
       - name: Build and run tests
-        run: nix develop --command -- ./ci/run.sh
+        run: ./ci/run.sh
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-output-${{ matrix.os }}-pg${{ matrix.pg }}
+          name: test-output-pg${{ matrix.pg }}
           path: |
-            out/*/var/postgres/log/server.log
+            out/pg/postgres/log/server.log
             examples/*/regression.diffs
             examples/*/results/
           if-no-files-found: ignore
+
+  linux:
+    name: End-to-end (Ubuntu, PostgreSQL 18)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v7
+      - name: Install PostgreSQL 18
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-18 postgresql-server-dev-18 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
+      - name: Let the runner install extensions
+        run: |
+          pg_config=/usr/lib/postgresql/18/bin/pg_config
+          sudo chown -R "$USER" \
+            "$("$pg_config" --pkglibdir)" \
+            "$("$pg_config" --sharedir)/extension"
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Cache Zig cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/zig-pgzx
+          key: zig-${{ runner.os }}-${{ hashFiles('build.zig.zon', 'src/pgzx/c/include/*.h', 'src/pgzx/c/*.c') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+      - name: Build and install the pgzx bundle
+        run: |
+          ./tools/build-dist.sh --version v0.0.0-ci --hash 1220ci
+          ./install.sh --local dist --prefix "$RUNNER_TEMP/pgzx"
+          echo "$RUNNER_TEMP/pgzx/bin" >>"$GITHUB_PATH"
+      - name: Scaffold, build and test
+        run: |
+          set -euo pipefail
+          pgzx doctor
+          pgzx new demo --no-fetch
+          cd demo
+          # The generated project pins a release CI does not publish; build
+          # against this checkout instead.
+          # demo/ lives in the workspace root, so the checkout is its parent.
+          perl -0pi -e 's/\.pgzx = \.\{[^}]*\}/.pgzx = .{ .path = ".." }/' build.zig.zon
+          pgzx fingerprint
+          eval "$(pgzx env)"
+          pgzx init
+          pgzx start
+          trap 'pgzx stop || true' EXIT
+          zig build -p "$PG_HOME"
+          psql -U postgres -c 'CREATE EXTENSION demo'
+          psql -U postgres -tAc 'SELECT hello()' | grep -q 'Hello, world!'
+          zig build -p "$PG_HOME" unit
+          zig build pg_regress
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-output
+          path: |
+            demo/out/pg/postgres/log/server.log
+            demo/regression.diffs
+            demo/results/
+          if-no-files-found: ignore
+
+  macos:
+    name: End-to-end (macOS, PostgreSQL 18)
+    runs-on: macos-14
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v7
+      - name: Install PostgreSQL
+        run: |
+          brew install postgresql@18 openssl@3 krb5
+          echo "PG_CONFIG=$(brew --prefix postgresql@18)/bin/pg_config" >>"$GITHUB_ENV"
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Build and install the pgzx bundle
+        run: |
+          ./tools/build-dist.sh --version v0.0.0-ci --hash 1220ci
+          ./install.sh --local dist --prefix "$RUNNER_TEMP/pgzx"
+          echo "$RUNNER_TEMP/pgzx/bin" >>"$GITHUB_PATH"
+      - name: Doctor and scaffold
+        run: |
+          set -euo pipefail
+          pgzx doctor
+          pgzx new demo --no-fetch
+          cd demo
+          # demo/ lives in the workspace root, so the checkout is its parent.
+          perl -0pi -e 's/\.pgzx = \.\{[^}]*\}/.pgzx = .{ .path = ".." }/' build.zig.zon
+          pgzx fingerprint
+          eval "$(pgzx env)"
+          zig build check
+          make check
+
+  templates:
+    name: Template
+    runs-on: ubuntu-24.04
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v7
+      - name: Install PostgreSQL 18 headers
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-server-dev-18 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Check the release stamping
+        run: |
+          ./tools/build-dist.sh --version v0.0.0-ci --hash 1220ci
+          grep -q 'refs/tags/v0.0.0-ci.tar.gz' dist/templates/default/build.zig.zon
+          grep -q '.hash = "1220ci"' dist/templates/default/build.zig.zon
+          ./dist/cli/bin/pgzx version | grep -qx 'v0.0.0-ci'
+      - name: Scaffold and compile
+        run: |
+          set -euo pipefail
+          ./dist/cli/bin/pgzx new demo --no-fetch
+          cd demo
+          # demo/ lives in the workspace root, so the checkout is its parent.
+          perl -0pi -e 's/\.pgzx = \.\{[^}]*\}/.pgzx = .{ .path = ".." }/' build.zig.zon
+          ../dist/cli/bin/pgzx fingerprint
+          eval "$(../dist/cli/bin/pgzx env)"
+          zig build check

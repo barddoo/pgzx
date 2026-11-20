@@ -12,9 +12,8 @@ pgzx extension on your machine. It assumes you have cloned this repository.
 - [HACKING: local development guide](#hacking-local-development-guide)
   - [Table of contents](#table-of-contents)
   - [1. Prerequisites](#1-prerequisites)
-  - [1a. Without Nix — Docker / raw install](#1a-without-nix--docker--raw-install)
-  - [2. Enter the development shell](#2-enter-the-development-shell)
-  - [3. Create the local PostgreSQL installation](#3-create-the-local-postgresql-installation)
+  - [2. Load the project environment](#2-load-the-project-environment)
+  - [3. Create the local PostgreSQL cluster](#3-create-the-local-postgresql-cluster)
   - [4. Repository layout](#4-repository-layout)
   - [5. Environment variables](#5-environment-variables)
   - [6. Build an example extension](#6-build-an-example-extension)
@@ -35,93 +34,60 @@ pgzx extension on your machine. It assumes you have cloned this repository.
     - [Zig standard library / compiler](#zig-standard-library--compiler)
   - [14. CI](#14-ci)
   - [15. Troubleshooting](#15-troubleshooting)
+  - [16. Releasing](#16-releasing)
 
 ## 1. Prerequisites
 
-- **Nix** with flakes enabled. The
-  [DeterminateSystems installer](https://github.com/DeterminateSystems/nix-installer)
-  enables flakes out of the box.
-- Optionally **direnv** to load the shell automatically.
+- **Zig 0.17 or newer** — [ziglang.org/download](https://ziglang.org/download/).
+- **PostgreSQL 15–18** with development headers. Debian/Ubuntu:
+  `postgresql-server-dev-NN`; macOS: `postgresql@NN`; Fedora: `postgresql-devel`.
+- A C toolchain and the OpenSSL/Kerberos headers (`libssl-dev libkrb5-dev`, or
+  `openssl@3 krb5` on Homebrew).
 - Linux or macOS (x86_64 or aarch64).
+- Optionally **direnv** to load the project environment automatically.
 
-If you cannot or do not want to install Nix, see [§ 1a — Without Nix](#1a-without-nix-docker--raw-install) below.
+### Install the `pgzx` command
 
-## 1a. Without Nix — Docker / raw install
-
-Two paths that need neither Nix nor a custom Docker image that bakes Nix in.
-
-### Option A — Docker (recommended for quick start)
-
-A self-contained image installs Zig and PostgreSQL directly:
+macOS, with Homebrew:
 
 ```sh
-# Build the image (once; ~3 min on first build, cached after)
-docker build \
-  -f dev/docker/Dockerfile.standalone \
-  -t pgzx-standalone \
-  .
-
-# Or pick a PostgreSQL version:
-docker build \
-  --build-arg PG_MAJOR=16 \
-  --build-arg ZIG_VERSION=0.17.1 \
-  -f dev/docker/Dockerfile.standalone \
-  -t pgzx-standalone:pg16 \
-  .
+brew install barddoo/tap/pgzx
 ```
 
-Then drop into a shell with the repo mounted live:
+Linux, and macOS without Homebrew:
 
 ```sh
-docker run -it --rm -v "$PWD:/workspace" pgzx-standalone
+curl -fsSL https://github.com/barddoo/pgzx/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Or use Compose (mounts the repo automatically):
+Check the environment before going further:
 
 ```sh
-docker compose -f dev/docker/docker-compose.yml run --rm dev
+pgzx doctor
 ```
 
-Inside the container the helper scripts (`pglocal`, `pginit`, `pgstart`, …)
-are on `PATH` and you follow the same workflow as §§ 3–10 below, with one
-difference: `pglocal` is not needed because the PostgreSQL installation is
-already in `/usr/lib/postgresql/<PG_MAJOR>`. Instead, set `PG_HOME` to point
-directly at it:
+It reports Zig, `pg_config`, the server headers, the extra C headers needed by
+the PostgreSQL header translation, and whether the extension directories are
+writable. Each failure is printed with the command that fixes it.
+
+### Option A — Homebrew (macOS)
 
 ```sh
-# Inside the container — run once
-export PG_MAJOR=18   # or whichever version you built the image with
-export PG_HOME=/usr/lib/postgresql/${PG_MAJOR}
-export PATH="$PG_HOME/bin:$PATH"
-export PGHOST=/run/postgresql
-
-# Initialise and start the server
-pginit
-pgstart
-psql -U postgres -c 'select version()'
+brew install postgresql@18 openssl@3 krb5 zig
+brew link --force postgresql@18
 ```
 
-Then build and install extensions the normal way:
+Homebrew prefixes are owned by your user, so installing the extension into
+PostgreSQL needs no elevated permissions.
+
+### Option B — Raw install (Linux)
+
+Install Zig from [ziglang.org/download](https://ziglang.org/download/) and put
+it on `PATH`:
 
 ```sh
-cd examples/char_count_zig
-zig build -p "$PG_HOME"
-```
-
-> **Note:** The container runs as a non-root `dev` user. `/run/postgresql` is
-> pre-created and owned by that user, so the Unix socket works without sudo.
-
-### Option B — Raw install (Linux / macOS)
-
-#### Install Zig
-
-Download the latest stable release from [ziglang.org/download](https://ziglang.org/download/)
-and add it to `PATH`. pgzx requires **Zig 0.17 or newer**.
-
-```sh
-# Example — Linux x86_64
 ZIG_VERSION=0.17.1
-# URL format as of 0.17+: zig-<arch>-linux-<version>
 curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
      -o /tmp/zig.tar.xz
 sudo tar -C /usr/local -xJf /tmp/zig.tar.xz
@@ -129,15 +95,10 @@ sudo ln -s "/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 zig version   # should print 0.17.1
 ```
 
-macOS: `brew install zig` installs the current stable release.
-
-#### Install PostgreSQL and dev headers
-
-**Ubuntu / Debian**
+Install PostgreSQL and its development headers:
 
 ```sh
 PG_MAJOR=18   # or 15 / 16 / 17
-# Add the PGDG apt repository
 curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
   | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
 echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
@@ -150,125 +111,142 @@ sudo apt-get install -y \
     libssl-dev libkrb5-dev
 ```
 
-**Fedora / RHEL**
+On Fedora/RHEL:
 
 ```sh
 sudo dnf install -y postgresql-server postgresql-devel openssl-devel krb5-devel
 ```
 
-**macOS (Homebrew)**
+`zig build -p "$PG_HOME"` writes the shared library and the extension SQL into
+the PostgreSQL prefix. Distro packages make those directories root-owned, so
+give your user write access once:
 
 ```sh
-brew install postgresql@18   # or @15 / @16 / @17
-brew link postgresql@18 --force
+sudo chown -R "$(id -un)" \
+  "$(pg_config --pkglibdir)" \
+  "$(pg_config --sharedir)/extension"
 ```
 
-The brew formula includes dev headers; no separate `*-dev` package is needed.
+(On Homebrew and in the Docker image this is not needed.)
 
-#### Set environment variables
-
-Add these to your shell profile (`.bashrc`, `.zshrc`, etc.):
+### Option C — Docker (nothing installed on the host)
 
 ```sh
-# Adjust PG_MAJOR and the prefix to match your install
-export PG_MAJOR=18
+# Build once (~3 min; cached afterwards). Pick a PostgreSQL version if needed.
+docker build \
+  --build-arg PG_MAJOR=18 \
+  -f dev/docker/Dockerfile.standalone \
+  -t pgzx-standalone \
+  .
 
-# Linux PGDG
-export PG_HOME=/usr/lib/postgresql/${PG_MAJOR}
-export PATH="$PG_HOME/bin:$PATH"
-export PGHOST=/run/postgresql   # or wherever the socket lives
-
-# macOS Homebrew
-# export PG_HOME=$(brew --prefix "postgresql@${PG_MAJOR}")
-# export PATH="$PG_HOME/bin:$PATH"
-# export PGHOST=/tmp   # Homebrew uses /tmp for sockets
-
-# Repo helpers (from the pgzx checkout)
-export PRJ_ROOT=/path/to/pgzx
-export PATH="$PRJ_ROOT/dev/bin:$PATH"
-
-# Shared Zig build cache (optional but speeds up repeat builds)
-export ZIG_LOCAL_CACHE_DIR="$HOME/.cache/zig-pgzx"
+# Scaffold into the current directory, then work in the container.
+docker run -it --rm -v "$PWD:/work" -w /work pgzx-standalone
 ```
 
-#### Initialise and start the server
+Inside the container, Zig, PostgreSQL (with headers), and `pgzx` are already on
+`PATH`. The extension directories are owned by the container's `dev` user, so
+`zig build -p "$PG_HOME"` works without `sudo`:
 
 ```sh
-pginit    # initdb + create 'postgres' superuser; run once
-pgstart   # start the server
-pgstatus  # check it's running
-psql -U postgres -c 'select version()'
+pgzx new my_ext
+cd my_ext
+eval "$(pgzx env)"
+pgzx init && pgzx start
+zig build -p "$PG_HOME"
+psql -U postgres -c 'CREATE EXTENSION my_extension'
+pgzx stop
 ```
 
-> On Linux the socket directory `/run/postgresql` must be writable by your
-> user, or set `PGHOST` to a directory you own (e.g. `/tmp`).
-
-After that, build and test extensions exactly as described in §§ 6–10.
-
-## 2. Enter the development shell
+Or use Compose, which mounts the repository at `/workspace`:
 
 ```sh
-nix develop
+docker compose -f dev/docker/docker-compose.yml run --rm dev
 ```
 
-The first entry is slow: Nix builds/fetches Zig, `zls`, PostgreSQL 15-18, the
-linters, and a few tools. Subsequent entries are cached.
+### Create and run the project (all options)
 
-With direnv the shell loads automatically:
+```sh
+pgzx doctor
+pgzx new my_ext
+cd my_ext
+eval "$(pgzx env)"     # or: direnv allow
+pgzx init && pgzx start
+zig build -p "$PG_HOME"
+psql -U postgres -c 'CREATE EXTENSION my_extension'
+psql -U postgres -c 'SELECT hello()'
+zig build -p "$PG_HOME" unit
+zig build pg_regress
+pgzx stop
+```
+
+`pgzx new` uses `templates/default`. Cluster state lives in `<project>/out/pg`,
+so nothing is written into the PostgreSQL installation. Use `PG_CONFIG` to
+pick a PostgreSQL version (see [§12](#12-switch-postgresql-versions)).
+
+## 2. Load the project environment
+
+From a checkout, build the CLI once and put it on `PATH`:
+
+```sh
+zig build cli
+export PATH="$PWD/zig-out/bin:$PATH"
+```
+
+`pgzx env` prints shell exports for the project; evaluate them in the shell you
+build from:
+
+```sh
+eval "$(pgzx env)"
+```
+
+It derives `PG_HOME`, `PGHOST`, the socket directory, the include paths and a
+shared Zig cache from `pg_config`, and prepends the PostgreSQL `bin` and
+`pg_regress` directories to `PATH`. Run it again after changing `PG_CONFIG`.
+
+With direnv, the generated project's `.envrc` loads it automatically:
 
 ```sh
 direnv allow
 ```
 
-There is a second shell with extra tooling to build PostgreSQL and Zig from
-source (see [Debugging](#13-debugging)):
+The commands are subcommands of the `pgzx` binary:
+
+| Command                           | Purpose                                   |
+| --------------------------------- | ----------------------------------------- |
+| `pgzx new <name>`                 | Create a new extension project            |
+| `pgzx env`                        | Print the project environment             |
+| `pgzx init` / `start` / `stop` / `status` | Control the local cluster          |
+| `pgzx doctor`                     | Check Zig, PostgreSQL and headers         |
+| `pgzx fingerprint`                | Refresh the package fingerprint           |
+
+## 3. Create the local PostgreSQL cluster
 
 ```sh
-nix develop '.#debug'
-```
-
-On shell entry you get a menu of the helper commands:
-
-| Command                           | Purpose                                            |
-| --------------------------------- | -------------------------------------------------- |
-| `pguse <15\|16\|17\|18\|local>`   | Select the PostgreSQL version to use               |
-| `pglocal`                         | Relocate a PostgreSQL install into `out/<version>` |
-| `pginit`                          | Initialize the local cluster and database          |
-| `pgstart` / `pgstop` / `pgstatus` | Control the local server                           |
-| `menu`                            | Show the command list                              |
-| `root` (alias)                    | `cd` back to the project root                      |
-
-## 3. Create the local PostgreSQL installation
-
-We never install into the Nix store. Instead `pglocal` copies (relocates) a
-PostgreSQL installation into `out/<version>` and symlinks `out/default` to it,
-so we can write extension libraries into it.
-
-```sh
-pguse 16        # choose a version (writes out/.pgversion)
-pglocal         # relocate out/16 and point out/default at it
-pginit          # initdb + create the 'postgres' superuser
-pgstart        # start the server
-pgstatus       # show the server status
+eval "$(pgzx env)"
+pgzx init        # initdb + create the 'postgres' superuser
+pgzx start       # start the server
+pgzx status      # show the server status
 psql -U postgres -c 'select version()'
-pgstop         # stop the server
+pgzx stop        # stop the server
 ```
 
 Notes:
 
-- Run `pglocal` once per version, and `pginit` once per version. Each version
-  keeps its own cluster under `out/<version>/var/postgres`.
-- `pginit` accepts optional arguments:
+- Cluster state lives in `<project>/out/pg/postgres`; it is independent of the
+  PostgreSQL installation, so a read-only system prefix works.
+- `pgzx init` accepts optional arguments:
   ```sh
-  pginit <cluster> <database> <user>
-  pginit -p 5433                       # custom port
-  pginit -s pg_stat_statements         # shared_preload_libraries
-  pginit -i path/to/sql/dir            # run *.sql on init
-  pginit -c path/to/postgresql.conf    # custom config
+  pgzx init <cluster> <database> <user>
+  pgzx init -p 5433                    # custom port
+  pgzx init -s pg_stat_statements      # shared_preload_libraries
+  pgzx init -i path/to/sql/dir         # run *.sql on init
+  pgzx init -c path/to/postgresql.conf # custom config
   ```
-- The Unix socket lives in `out/default/run` (not the compiled-in
-  `/run/postgresql`), and `PGHOST` is exported to point at it.
-- Server logs are written to `out/default/var/postgres/log/server.log`.
+- The Unix socket lives in `out/pg/run` (not the compiled-in
+  `/run/postgresql`), and `PGHOST` points at it.
+- Server logs are written to `out/pg/postgres/log/server.log`.
+- `PGZX_CLUSTER_DIR` moves the cluster state and `PG_SOCKET_DIR` moves the
+  socket; `pgzx env` sets both under `<project>/out/pg` by default.
 
 ## 4. Repository layout
 
@@ -280,10 +258,10 @@ src/pgzx/build.zig   build helpers (PGBuild) used by extensions
 src/pgzx/c/          C shims and the Postgres header translation
 src/testing.zig      entry point for the in-server unit test extension
 examples/            sample extensions, each its own package
-dev/bin/             pglocal, pginit, pgstart, ... helper scripts
-nix/                 flake modules and the project template
-tools/               codegen tools (e.g. gennodetags)
-out/                 relocated PostgreSQL installs (git-ignored)
+dev/bin/             pgbuild and other host tooling (`pgzx` itself is built to zig-out/bin)
+templates/default/   the project template used by `pgzx new`
+tools/               codegen and release scripts (build-dist)
+out/                 local cluster state (git-ignored)
 ```
 
 Every directory under `examples/` is a self-contained Zig package with its own
@@ -291,20 +269,21 @@ Every directory under `examples/` is a self-contained Zig package with its own
 
 ## 5. Environment variables
 
-The development shell sets these for you:
+`pgzx env` sets these for you:
 
 | Variable              | Value                   | Meaning                                      |
 | --------------------- | ----------------------- | -------------------------------------------- |
-| `PRJ_ROOT`            | project root            | used by the helper scripts                   |
-| `PG_HOME`             | `$PRJ_ROOT/out/default` | the relocated install in use                 |
-| `PGHOST`              | `$PG_HOME/run`          | Unix socket directory for clients            |
-| `NIX_PGLIBDIR`        | `$PG_HOME/lib`          | where the Nix PostgreSQL looks for modules   |
-| `PGZX_C_INCLUDE_DIRS` | store paths             | extra C headers for the header translation   |
+| `PRJ_ROOT`            | project root            | used by the CLI and tooling                  |
+| `PG_HOME`             | `pg_config` prefix      | the PostgreSQL installation in use           |
+| `PGHOST`              | `$PG_SOCKET_DIR`        | Unix socket directory for clients            |
+| `PGZX_CLUSTER_DIR`    | `<project>/out/pg`      | cluster state                                 |
+| `PG_SOCKET_DIR`       | `$PGZX_CLUSTER_DIR/run` | Unix socket directory used by the server     |
+| `PGZX_C_INCLUDE_DIRS` | Homebrew paths          | extra C headers for the header translation   |
 | `ZIG_LOCAL_CACHE_DIR` | `~/.cache/zig-pgzx`     | shared Zig cache for the whole repo          |
-| `PG_VERSION`          | optional                | overrides the `pg_config` dispatcher version |
+| `PG_CONFIG`           | optional                | `pg_config` to use (default: `pg_config`)    |
 
-`pg_config` in the shell is a dispatcher: it picks the version from
-`$PG_VERSION`, else `out/.pgversion`, else PostgreSQL 16.
+To work against a specific installation, point `PG_CONFIG` at its `pg_config`
+before evaluating `pgzx env`.
 
 ## 6. Build an example extension
 
@@ -451,23 +430,31 @@ has a `zig build test` target that runs under `zig test`.
 
 ## 11. Create a new extension project
 
-Use the flake template:
-
 ```sh
-nix flake init -t github:barddoo/pgzx
-nix develop
-pguse 16 && pglocal && pginit
+pgzx new my_extension
+cd my_extension
+eval "$(pgzx env)"
+pgzx init && pgzx start
 zig build -p "$PG_HOME"
 ```
 
-While developing pgzx itself, template from your checkout instead:
+While developing pgzx itself, build the CLI and template from your checkout instead:
 
 ```sh
-nix flake init -t /path/to/pgzx
+zig build cli
+./zig-out/bin/pgzx new my_extension
 ```
 
-The template ships a `flake.nix`, `devshell.nix`, `.envrc`, `build.zig`,
-`build.zig.zon`, `src/main.zig`, `extension/`, and `sql/` + `expected/` folders.
+The template ships `build.zig`, `build.zig.zon`, `src/main.zig`, `extension/`,
+and `sql/` + `expected/` folders, plus a `Makefile` and an `.envrc` that calls
+`pgzx env`.
+
+`pgzx new` pins the pgzx dependency to the release it came from and writes the
+package hash, so the generated project builds without editing
+`build.zig.zon`. From a checkout it runs `zig fetch --save=pgzx <ref>` instead;
+pass `--pgzx-ref <tag>` to pin a specific release, or `--no-fetch` when the
+environment has no network access.
+
 For local development point the dependency at your checkout:
 
 ```zig
@@ -477,18 +464,23 @@ For local development point the dependency at your checkout:
 
 ## 12. Switch PostgreSQL versions
 
+Install the versions you want side by side (apt PGDG, Homebrew `postgresql@NN`)
+and select one with `PG_CONFIG`:
+
 ```sh
-pguse 17
-pglocal
-pginit
+export PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config   # or $(brew --prefix postgresql@17)/bin/pg_config
+eval "$(pgzx env)"
+pgzx init && pgzx start
 cd examples/char_count_zig
 rm -rf .zig-cache       # IMPORTANT: rebuild the Postgres header translation
 zig build -p "$PG_HOME"
 ```
 
-Always delete the local `.zig-cache` when switching versions (or when you
-changed the PostgreSQL headers), otherwise Zig may reuse a translation of the
-old headers.
+Each version needs its own cluster: `pgzx env` derives `PGZX_CLUSTER_DIR` from
+the project, so remove `out/pg` (or point `PGZX_CLUSTER_DIR` elsewhere) when
+switching. Always delete the local `.zig-cache` when switching versions (or
+when you changed the PostgreSQL headers), otherwise Zig may reuse a
+translation of the old headers.
 
 ## 13. Debugging
 
@@ -514,11 +506,12 @@ Then attach (`lldb -p 14985`, `gdb -p 14985`, or VS Code) and run
 ### VS Code
 
 Use the [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb)
-extension and attach to the backend PID. Start VS Code from the dev shell so it
-inherits the environment:
+extension and attach to the backend PID. Start VS Code from a shell that has
+the project environment so it inherits it:
 
 ```sh
-nix develop '.#debug' --command code .
+eval "$(pgzx env)"
+code .
 ```
 
 If a VS Code instance is already running, the `code` launcher forwards to it
@@ -555,33 +548,30 @@ SELECT run_tests();
 
 If the editor shows `(unknown)` for `@import("pgzx")`, ZLS could not evaluate
 `build.zig`. The pgzx build runs `pg_config` and translates the Postgres
-headers at configure time, so ZLS must run with the development shell
-environment. Symptoms are translate-c errors such as `'postgres.h' not found`
-in the ZLS output panel.
+headers at configure time, so ZLS must run with the environment from
+`eval "$(pgzx env)"`. Symptoms are translate-c errors such as
+`'postgres.h' not found` in the ZLS output panel.
 
-- Start the editor from `nix develop`, or rely on direnv (`.envrc` uses
-  `use flake`).
-- Launch the editor from `nix develop` so `zls` is found on `PATH`; the
-  checked in `.vscode/settings.json` enables the extension but deliberately
-  does not pin a Nix store path. Pin `zig.zls.path` in your user settings
-  instead (`which zls` inside the shell) if you need a specific binary, since
-  store paths change when `flake.lock` updates.
+- Start the editor from a shell where `eval "$(pgzx env)"` has been run, or
+  rely on direnv (the project `.envrc` calls `pgzx env`).
+- Install `zls` and put it on `PATH` so the editor extension can find it.
 - `zls.json` enables build-on-save so the project is re-indexed with
   `zig build check`.
 - Restart the extension host after changing the environment.
 
 ### PostgreSQL debug build
 
-For stepping into PostgreSQL itself:
+For stepping into PostgreSQL itself, build it from source (needs `git`, meson,
+ninja, ccache and a C toolchain):
 
 ```sh
-nix develop '.#debug'
 pgbuild
-pguse local
+export PG_CONFIG="$PRJ_ROOT/out/local/bin/pg_config"
+eval "$(pgzx env)"
 ```
 
 This checks out PostgreSQL into `out/postgresql_src` and installs a debug build
-into `out/local`, which you can select with `pguse local`.
+into `out/local`.
 
 ### Zig standard library / compiler
 
@@ -590,14 +580,15 @@ ziglocal clone --branch 0.16.0
 zig build unit -p "$PG_HOME" --zig-lib-dir "$PRJ_ROOT/out/zig/lib"
 ```
 
-The `debug` shell has the extra dependencies to build the Zig compiler too.
+The extra tooling for building the Zig compiler and PostgreSQL from source
+(clang, llvm, meson, ninja, ccache) must be installed on the host.
 
 ## 14. CI
 
 The CI is a shell script and works the same locally:
 
 ```sh
-./ci/setup.sh   # pglocal + pginit
+./ci/setup.sh   # zig build cli + eval "$(pgzx env)" + pgzx init
 ./ci/run.sh     # build all examples, run pgzx unit tests and every example
 ```
 
@@ -605,16 +596,32 @@ The CI is a shell script and works the same locally:
 unit tests, then runs each example's `ci/run.sh` (build, create extension, unit
 tests, regression tests, drop). It prints `Success!` on success.
 
+The GitHub workflows run the same flow against PGDG packages for PostgreSQL
+15–18, plus end-to-end jobs and a release gate (`release.yaml` calls
+`check.yaml`):
+
+- `lint` — shellcheck, shfmt and actionlint (the same tools as the local
+  `.pre-commit-config.yaml`).
+- `test` — the repo's `ci/setup.sh`/`ci/run.sh` on every supported PostgreSQL
+  version.
+- `linux` — installs the release bundle with `install.sh --local`, then
+  scaffolds, builds, and runs unit + regression tests.
+- `macos` — Homebrew PostgreSQL 18 + Zig, runs `pgzx doctor` and compiles the
+  template.
+- `templates` — scaffolds the template and asserts the release stamping writes
+  the tag URL and package hash.
+
 ## 15. Troubleshooting
 
 | Symptom                                           | Cause / fix                                                                                                           |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `failed to spawn .../pg_regress: FileNotFound`    | `pg_config --pkglibdir` does not contain the pgxs tooling; the build now derives `pg_regress` from `pg_config --pgxs` |
 | `could not access file "foo_unit"`                | the unit library was not installed into the server libdir; run `zig build -p "$PG_HOME" unit`                         |
+| `cannot create cluster state ...`                | the PostgreSQL prefix is read-only; set `PGZX_CLUSTER_DIR` to a writable directory (or use `pgzx env`, which does)      |
 | `SET` outside the valid range instead of clamping | core validates `min/max` *before* check hooks; widen the bounds                                                       |
-| `server closed the connection unexpectedly`       | a crash (e.g. a NULL value address); check `out/default/var/postgres/log/server.log`                                  |
-| `(unknown)` for pgzx imports in the editor        | ZLS is missing the dev-shell environment; see [Editor setup](#editor-setup-zls)                                       |
-| stale weird errors after `pguse`                  | `rm -rf .zig-cache` in the package and rebuild                                                                        |
+| `server closed the connection unexpectedly`       | a crash (e.g. a NULL value address); check `out/pg/postgres/log/server.log`                                            |
+| `(unknown)` for pgzx imports in the editor        | ZLS is missing the environment from `eval "$(pgzx env)"`; see [Editor setup](#editor-setup-zls)                        |
+| stale weird errors after changing `PG_CONFIG`     | `rm -rf .zig-cache` in the package and rebuild                                                                        |
 
 Useful commands:
 
@@ -623,4 +630,51 @@ SHOW client_min_messages;   -- what is sent to the client
 SHOW log_min_messages;      -- what is written to the server log
 ```
 
-The server log is at `$PG_HOME/var/postgres/log/server.log`.
+The server log is at `$PGZX_CLUSTER_DIR/postgres/log/server.log`
+(`out/pg/postgres/log/server.log` by default).
+
+## 16. Releasing
+
+`tools/build-dist.sh` cross-compiles the CLI and writes these into `dist/`:
+
+| Artifact | Notes |
+| --- | --- |
+| `pgzx-cli-<tag>-aarch64-macos.tar.gz` | Apple silicon |
+| `pgzx-cli-<tag>-x86_64-macos.tar.gz` | Intel macOS |
+| `pgzx-cli-<tag>-aarch64-linux-musl.tar.gz` | Linux arm64, statically linked |
+| `pgzx-cli-<tag>-x86_64-linux-musl.tar.gz` | Linux x86_64, statically linked |
+| `pgzx-template-<tag>.tar.gz` | project template |
+| `install.sh` | target-detecting installer |
+| `SHA256SUMS` | checksums for every archive |
+
+Build them locally with the package hash of the tagged source tarball:
+
+```sh
+hash=$(zig fetch https://github.com/barddoo/pgzx/archive/refs/tags/vX.Y.Z.tar.gz | tail -n1)
+tools/build-dist.sh --version vX.Y.Z --hash "$hash"
+```
+
+`PGZX_TARGETS` limits the target list while iterating, for example
+`PGZX_TARGETS="aarch64-macos" tools/build-dist.sh ...`. The script also builds a
+host bundle at `dist/cli/`, which is what `install.sh --local` uses.
+
+Test the bundle before tagging:
+
+```sh
+prefix=$(mktemp -d)
+./install.sh --local dist --prefix "$prefix"
+"$prefix/bin/pgzx" version
+demo=$(mktemp -d) && (cd "$demo" && "$prefix/bin/pgzx" new demo --no-fetch)
+```
+
+Publishing:
+
+1. Push a `vX.Y.Z` tag. `.github/workflows/release.yaml` re-runs `check.yaml`,
+   runs `build-dist`, and uploads every `dist/*.tar.gz`, `SHA256SUMS` and
+   `install.sh` to the GitHub release.
+2. Render `dev/homebrew/pgzx.rb`: set `version` and the four `sha256` values
+   from `dist/SHA256SUMS`, then copy it to
+   `barddoo/homebrew-tap/Formula/pgzx.rb`.
+3. Users install with `brew install barddoo/tap/pgzx` or the release
+   `install.sh`. `install.sh` detects the host target; `PGZX_TARGET` overrides
+   it for cross-installs.

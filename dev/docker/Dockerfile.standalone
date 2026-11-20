@@ -1,31 +1,40 @@
 # syntax=docker/dockerfile:1
-# Nix-free development image for pgzx.
+# Development image for pgzx.
 #
-# Installs Zig and PostgreSQL (with dev headers) directly without Nix.
+# Installs Zig and PostgreSQL (with dev headers) directly.
 # Supports PostgreSQL 15–18 (default: 18).
 #
 # Build:
 #   docker build -f dev/docker/Dockerfile.standalone -t pgzx-standalone .
-#   docker build --build-arg PG_MAJOR=16 -f dev/docker/Dockerfile.standalone -t pgzx-standalone:pg16 .
+#   docker build --build-arg PG_MAJOR=16 --build-arg PG_VERSION=<16.x package version> \
+#     -f dev/docker/Dockerfile.standalone -t pgzx-standalone:pg16 .
 #
-# Run (mounts repo read-write):
+# PG_VERSION is the exact PGDG package version (`apt-cache policy
+# postgresql-<major>`); it must match PG_MAJOR.
+#
+# Run (mounts the repo at /workspace):
 #   docker run -it --rm -v "$PWD:/workspace" pgzx-standalone
 
 ARG PG_MAJOR=18
+ARG PG_VERSION=18.7-1.pgdg13+5
 ARG ZIG_VERSION=0.17.1
 
-FROM debian:trixie-slim
+# Pinned to the trixie-slim manifest list digest so rebuilds use the same base.
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
-LABEL org.opencontainers.image.source="https://github.com/xataio/pgzx"
-LABEL org.opencontainers.image.description="pgzx development environment (Zig + PostgreSQL, no Nix)"
+LABEL org.opencontainers.image.source="https://github.com/barddoo/pgzx"
+LABEL org.opencontainers.image.description="pgzx development environment (Zig + PostgreSQL)"
 
 ARG PG_MAJOR
+ARG PG_VERSION
 ARG ZIG_VERSION
 # ZSF minisign public key for Zig 0.17.1 — https://ziglang.org/download/0.17.1/release-notes.html
 ARG ZIG_MINISIGN_PUBKEY=RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
+
+WORKDIR /workspace
 
 # Base packages
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -48,8 +57,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -y && \
     apt-get install -y --no-install-recommends \
-        postgresql-${PG_MAJOR} \
-        postgresql-server-dev-${PG_MAJOR}
+        "postgresql-${PG_MAJOR}=${PG_VERSION}" \
+        "postgresql-server-dev-${PG_MAJOR}=${PG_VERSION}"
 
 # Install minisign (not in Ubuntu 24.04 main; grab the upstream static binary)
 ARG MINISIGN_VERSION=0.11
@@ -66,7 +75,18 @@ RUN ARCH=$(uname -m) && \
 
 # Install Zig — verified against the ZSF minisign key, tries community mirrors first
 COPY --link dev/docker/install-zig.sh /usr/local/bin/install-zig.sh
-RUN install-zig.sh "${ZIG_VERSION}" "${ZIG_MINISIGN_PUBKEY}"
+RUN install-zig.sh "${ZIG_VERSION}" /usr/local "${ZIG_MINISIGN_PUBKEY}" && \
+    rm -f /usr/local/bin/install-zig.sh /usr/local/bin/minisign
+
+# The pgzx command (compiled from src/cli, no build.zig/PG headers needed) and
+# the project templates, so the image can scaffold a new extension anywhere:
+# `docker run --rm -v "$PWD:/workspace" -w /workspace <image> pgzx new my_ext`
+COPY --link src/cli/ /tmp/pgzx/
+RUN zig build-exe /tmp/pgzx/main.zig -OReleaseSafe -fstrip -femit-bin=/usr/local/bin/pgzx && \
+    rm -rf /tmp/pgzx
+COPY --link templates/ /usr/local/share/pgzx/templates/
+COPY --link install.sh /usr/local/share/pgzx/install.sh
+RUN chmod +x /usr/local/bin/pgzx && printf 'dev\n' > /usr/local/share/pgzx/VERSION
 
 # Non-root user
 ARG USERNAME=dev
@@ -80,6 +100,16 @@ RUN groupadd --gid ${USER_GID} ${USERNAME} && \
 
 # PostgreSQL socket directory writable by dev user
 RUN mkdir -p /run/postgresql && chown ${USER_UID}:${USER_GID} /run/postgresql
+
+# Some slim base images ship /tmp as root:root 0755, which breaks compilers
+# and anything else that needs a temporary file.
+RUN chmod 1777 /tmp
+
+# Extensions install into the PostgreSQL prefix, so let the dev user write the
+# library and extension directories (`zig build -p "$PG_HOME"`).
+RUN chown -R ${USER_UID}:${USER_GID} \
+        /usr/lib/postgresql/${PG_MAJOR}/lib \
+        /usr/share/postgresql/${PG_MAJOR}/extension
 
 USER ${USERNAME}
 

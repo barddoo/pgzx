@@ -1,0 +1,16 @@
+# Keep the build context small: the image only needs src/cli, templates,
+# install.sh and dev/docker/install-zig.sh.
+.git
+.github
+.vscode
+.zig-cache
+zig-out
+zig-pkg
+out
+dist
+docs
+examples
+brand-kit
+plans
+ci
+*.log

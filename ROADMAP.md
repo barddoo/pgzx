@@ -8,7 +8,8 @@ Legend: ✅ done · 🚧 partial · ⬜ planned
 
 - ✅ **SQL/DDL generation** — comptime `pgzx_sql` schema, type→SQL mapping, build step + pg_regress wiring
 - ✅ **Set-returning functions** — `SetOf`/`Table` value-per-call iterators with `SETOF`/`TABLE` DDL
-- ✅ **Reusable test harness** — `PGBuild`, `pg_regress`, in-server unit tests, `nix flake` template
+- ✅ **Reusable test harness** — `PGBuild`, `pg_regress`, in-server unit tests, project template
+- ✅ **Standalone development** — `pgzx` command (`new`, `env`, `init`, `start`, `stop`, `status`, `doctor`, `fingerprint`), release bundles and `install.sh`
 - ✅ **Composite + custom types** — base types, I/O functions, `pg_type` registration, composite rows
 - ✅ **Arrays + int/oid lists** — `[]T`, `text[]`, `IntList`/`OidList`, slist/dlist/htab
 - ✅ **GUCs** — `DefineCustom*Variable` wrappers with assign/show hooks
@@ -34,7 +35,7 @@ Legend: ✅ done · 🚧 partial · ⬜ planned
 ## Later / on demand
 
 - ⬜ Vendored Postgres source
-- ⬜ pgzx CLI
+- ⬜ Compiled `pgzx` binary that provisions Zig/PostgreSQL (the shell command covers scaffolding)
 - ⬜ WAL decoder / logical replication
 - ⬜ Index / table access methods
 

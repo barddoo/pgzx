@@ -1,0 +1,23 @@
+# Local-only hooks: shellcheck, shfmt and actionlint.
+#
+# Optional: CI runs the same three tools directly. Install with `pipx install
+# pre-commit`, then run `pre-commit run --all-files`. shellcheck, shfmt and
+# actionlint must be on PATH.
+repos:
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
+      - id: shfmt
+        name: shfmt
+        entry: shfmt -d -i 0 -ci -s
+        language: system
+        types: [shell]
+      - id: actionlint
+        name: actionlint
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$

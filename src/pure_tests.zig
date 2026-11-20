@@ -22,3 +22,10 @@ test "meta" {
 test "range" {
     try runSuite(range.TestSuite_Range);
 }
+
+test "cli helpers" {
+    _ = @import("cli/context.zig");
+    _ = @import("cli/doctor.zig");
+    _ = @import("cli/environment.zig");
+    _ = @import("cli/new.zig");
+}

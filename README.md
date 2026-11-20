@@ -44,17 +44,59 @@ The reference documentation is available at [here](https://barddoo.github.io/pgz
 
 ### Getting Started
 
-This project uses [Nix flakes](https://nixos.wiki/wiki/Flakes) to manage build dependencies and provide a development shell. A template bootstraps a new extension:
+You need **Zig 0.17+** and **PostgreSQL 15–18 with development headers**
+(`postgresql-server-dev-NN` on Debian/Ubuntu, `postgresql@NN` on Homebrew).
 
+Prebuilt commands are published for macOS (Apple silicon and Intel) and Linux
+(x86_64 and aarch64, statically linked).
+
+Install the `pgzx` command:
+
+```sh
+brew install barddoo/tap/pgzx              # macOS
+# or: curl -fsSL https://github.com/barddoo/pgzx/releases/latest/download/install.sh | sh
 ```
-$ mkdir my_extension
-$ cd my_extension
-$ nix flake init -t github:barddoo/pgzx
+
+The install script accepts `--prefix DIR` (default `~/.local`) and `--with-zig`;
+it picks the binary for your OS/architecture and verifies the release checksum.
+
+From source (needs Zig and PostgreSQL headers):
+
+```sh
+zig build cli
+./zig-out/bin/pgzx version
 ```
 
-This creates a working extension named `my_extension` exporting a `hello()` function. Its [README](./nix/templates/init/README.md) explains how to enter the shell, build, and test it. Rename the project by updating the files in `extension/` and replacing `my_extension` in `README.md`, `build.zig`, `build.zig.zon`, and the extension SQL file.
+Then create and run an extension:
 
-The development shell sets the environment used by the project (see [devshell.nix](./devshell.nix)): `PRJ_ROOT` is the project folder, and `PG_HOME` is the Postgres install prefix (the shell relocates Postgres into `./out` and points `./out/default` at the active version). For a complete local setup guide see [HACKING.md](HACKING.md).
+```sh
+pgzx doctor
+pgzx new my_extension
+cd my_extension
+eval "$(pgzx env)"
+pgzx init && pgzx start
+zig build -p "$PG_HOME"
+psql -U postgres -c 'CREATE EXTENSION my_extension'
+psql -U postgres -c 'SELECT hello()'
+```
+
+**With Docker** (nothing installed on the host):
+
+```sh
+docker build -f dev/docker/Dockerfile.standalone -t pgzx-standalone .
+docker run -it --rm -v "$PWD:/work" -w /work pgzx-standalone
+```
+
+Both paths create a working extension named `my_extension` exporting a
+`hello()` function.
+
+The generated [README](./templates/default/README.md) covers tests, the
+development loop and renaming the project. For a complete local setup guide see
+[HACKING.md](HACKING.md).
+
+`pgzx env` derives the project environment from `pg_config`: `PG_HOME` is the
+PostgreSQL install prefix and cluster state lives in `./out/pg`, so nothing is
+written into the PostgreSQL installation.
 
 ### Logging and error handling
 
@@ -269,11 +311,22 @@ PostgreSQL 15, 16, 17 and 18 are supported: the examples and unit tests are comp
 For a complete local development guide — creating a local PostgreSQL install, building, testing, debugging, editor setup, and switching Postgres versions — see [HACKING.md](HACKING.md).
 
 ```
-$ nix develop          # enter the development shell
-$ ./dev/docker/run.sh  # or use the docker development shell
+$ zig build cli        # build ./zig-out/bin/pgzx
+$ export PATH="$PWD/zig-out/bin:$PATH"
+$ eval "$(pgzx env)"   # set PG_HOME/PGHOST for the checkout
+$ ./dev/docker/run.sh  # or use the Docker image
 ```
 
 The examples build and test through each example's `ci/run.sh`; `./ci/run.sh` at the repo root runs all of them.
+
+## Releasing
+
+Releases are cut from a `v*.*.*` tag. The release workflow runs the checks and
+`tools/build-dist.sh`, then uploads per-target archives
+(`pgzx-cli-<tag>-<target>.tar.gz`), the template archive, `install.sh` and
+`SHA256SUMS`. See
+[HACKING.md § 16](HACKING.md#16-releasing) for the artifact list, local test
+steps and the Homebrew formula update.
 
 ## See also
 

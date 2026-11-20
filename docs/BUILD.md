@@ -8,9 +8,9 @@ points of view:
 2. **pgzx internals** — how `src/pgzx/build.zig` implements those steps, how the
    SQL generator is wired up, and how the pieces fit together.
 
-It complements [HACKING.md](../HACKING.md), which covers the development shell and
-a local PostgreSQL install. Where this document talks about `$PG_HOME`, that is
-the relocated PostgreSQL installation from HACKING.md.
+It complements [HACKING.md](../HACKING.md), which covers the local environment and
+a local PostgreSQL cluster. Where this document talks about `$PG_HOME`, that is
+the PostgreSQL installation `pgzx env` reports.
 
 ---
 
@@ -412,10 +412,10 @@ loads the library.
 `addInstallExtensionLibArtifact` computes the platform suffix (`.so`, `.dylib`)
 and decides where to put the result. Normally the package libdir
 (`pg_config --pkglibdir`) is inside `$PG_HOME`, so the artifact is installed at
-the relative path under the prefix. For split installations (notably Nix, where
-`--pkglibdir` may point elsewhere), it falls back to installing directly at the
-prefix root. This logic protects against deploying into the wrong tree when the
-install prefix is not `$PG_HOME`.
+the relative path under the prefix. For split installations (common with
+distro `-dev` packages, where `--pkglibdir` may point elsewhere), it falls
+back to installing directly at the prefix root. This logic protects against
+deploying into the wrong tree when the install prefix is not `$PG_HOME`.
 
 ## 3. `Project`: the extension-facing helper
 
@@ -533,8 +533,8 @@ changing the driver.
 
 `Build.addRegress` locates `pg_regress` from `pg_config --pgxs` (deriving the
 tool path from the pgxs makefile location, which keeps `pg_regress` consistent
-with the same PostgreSQL tree as the headers even when Nix splits outputs). It
-runs:
+with the same PostgreSQL tree as the headers even when split packages are
+installed). It runs:
 
 ```
 pg_regress --inputdir <root> --outputdir <root> --expecteddir <root> \

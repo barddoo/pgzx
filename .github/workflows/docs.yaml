@@ -22,23 +22,29 @@ jobs:
   docs:
     name: Build docs
     runs-on: ubuntu-24.04
-    env:
-      PG_VERSION: "18"
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
-      - name: Create local PostgreSQL installation
+          version: 0.17.1
+      - name: Install PostgreSQL 18
         run: |
-          nix develop --command -- pguse "$PG_VERSION"
-          nix develop --command -- pglocal
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-server-dev-18 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
       - name: Generate docs
-        run: nix develop --command -- zig build docs
+        run: |
+          zig build cli
+          eval "$(./zig-out/bin/pgzx env)"
+          zig build docs
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:

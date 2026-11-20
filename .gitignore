@@ -1,5 +1,4 @@
-/.pre-commit-config.yaml
-.vscode/
+/.vscode/
 compile_commands.json
 .cache
 .zig-cache/
@@ -18,3 +17,5 @@ results/
 /docs/main.js
 /docs/main.wasm
 /docs/sources.tar
+
+dist/

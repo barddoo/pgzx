@@ -9,13 +9,9 @@
 *.zig     text eol=lf
 *.zon     text eol=lf
 *.sh      text eol=lf
-*.nix     text eol=lf
 *.sql     text eol=lf
 *.control text eol=lf
 *.out     text eol=lf
 
 # Extensionless helper scripts under dev/bin.
 dev/bin/* text eol=lf
-
-# Generated lock file — keep it out of GitHub's language statistics.
-flake.lock linguist-generated

@@ -32,29 +32,50 @@ jobs:
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+      - name: Install PostgreSQL headers
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-server-dev-18 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
       - name: Compute the Zig package hash
         id: pkg
         env:
           TARBALL: ${{ github.server_url }}/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz
         run: |
-          hash=$(nix develop --command -- zig fetch "$TARBALL" | tail -n 1)
+          hash=$(zig fetch "$TARBALL" | tail -n 1)
           echo "tarball=$TARBALL" >>"$GITHUB_OUTPUT"
           echo "hash=$hash" >>"$GITHUB_OUTPUT"
+      - name: Build distribution artifacts
+        env:
+          TAG: ${{ github.ref_name }}
+          HASH: ${{ steps.pkg.outputs.hash }}
+        run: ./tools/build-dist.sh --version "$TAG" --hash "$HASH"
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           TARBALL: ${{ steps.pkg.outputs.tarball }}
           HASH: ${{ steps.pkg.outputs.hash }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           {
-            echo "## Use this release"
+            echo "## Install"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/$REPOSITORY/releases/download/$TAG/install.sh | sh"
+            echo '```'
+            echo
+            echo "## Use this release in a Zig project"
             echo
             echo '```sh'
             echo "zig fetch --save=pgzx $TARBALL"
@@ -64,3 +85,4 @@ jobs:
             echo
           } >notes.md
           gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md --generate-notes
+          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS dist/install.sh
