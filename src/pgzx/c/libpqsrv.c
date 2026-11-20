@@ -29,5 +29,10 @@ pqsrv_disconnect(void *conn)  {
 
 void
 pgsrv_wait_connected(void *conn, uint32 wait_event_info) {
+#if PG_VERSION_NUM >= 190000
+    // PG19 renamed libpqsrv_connect_internal() to libpqsrv_connect_complete().
+    libpqsrv_connect_complete(conn, wait_event_info);
+#else
     libpqsrv_connect_internal(conn, wait_event_info);
+#endif
 }

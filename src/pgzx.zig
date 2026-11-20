@@ -30,6 +30,8 @@ pub const HTabIter = collections.htab.HTabIter;
 pub const StringHashTable = collections.htab.StringHashTable;
 pub const KVHashTable = collections.htab.KVHashTable;
 
+pub const range = @import("pgzx/range.zig");
+
 pub const datum = @import("pgzx/datum.zig");
 
 pub const heap_tuple = @import("pgzx/heap_tuple.zig");
