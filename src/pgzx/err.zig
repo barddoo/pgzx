@@ -189,7 +189,7 @@ pub const Context = struct {
     }
 };
 
-pub inline fn wrap(comptime f: anytype, args: anytype) ElogIndicator!wrap_ret(@TypeOf(f)) {
+pub inline fn wrap(comptime f: anytype, args: anytype) ElogIndicator!wrapRet(f, @TypeOf(args)) {
     var errctx = Context.init();
     defer errctx.deinit();
     if (errctx.pg_try()) {
@@ -199,12 +199,19 @@ pub inline fn wrap(comptime f: anytype, args: anytype) ElogIndicator!wrap_ret(@T
     }
 }
 
-inline fn wrap_ret(comptime f: type) type {
-    const ti = @typeInfo(f);
+/// Return type of calling `f` with an `Args` tuple.
+///
+/// Function-like macros that translate-c turns into generic `inline fn`s (for
+/// example `dsa_create` on PostgreSQL 17+) have no declared return type, so
+/// derive it from the call instead.
+inline fn wrapRet(comptime f: anytype, comptime Args: type) type {
+    const ti = @typeInfo(@TypeOf(f));
     if (ti != .@"fn") {
         @compileError("wrap only works with functions");
     }
-    return ti.@"fn".return_type.?;
+    if (ti.@"fn".return_type) |ret| return ret;
+    const args: Args = undefined;
+    return @TypeOf(@call(.auto, f, args));
 }
 
 pub const TestSuite_Err = struct {
