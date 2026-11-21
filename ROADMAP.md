@@ -30,7 +30,7 @@ Legend: ✅ done · 🚧 partial · ⬜ planned
 - ⬜ **Triggers**
 - ⬜ **Aggregates** — also unblocks window + ordered-set aggregates
 - ⬜ **`zig build package`**
-- ⬜ **PG 14 support** — CI matrix currently covers 15–18
+- ⬜ **PG 14 support** — CI matrix currently covers 15–19
 
 ## Later / on demand
 

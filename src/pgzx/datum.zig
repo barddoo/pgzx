@@ -869,7 +869,7 @@ fn arrayToDatum(comptime Elem: type, elem_oid: pg.Oid, values: []const Elem) !pg
         layout.byval,
         layout.alignment,
     });
-    return pg.PointerGetDatum(arr);
+    return pointerToDatum(arr);
 }
 
 fn idDatum(d: pg.Datum) pg.Datum {
@@ -879,6 +879,13 @@ fn idDatum(d: pg.Datum) pg.Datum {
 fn toVoid(d: void) pg.Datum {
     _ = d;
     return 0;
+}
+
+/// `PointerGetDatum`, written in Zig. PostgreSQL 19 turned it into a macro
+/// whose `true ? (X) : NULL` pointer check translate-c cannot reproduce for
+/// typed pointers, so avoid the translated helper.
+pub inline fn pointerToDatum(ptr: anytype) pg.Datum {
+    return @intCast(@intFromPtr(ptr));
 }
 
 /// Scalar Datum conversions, written in Zig rather than using the translated
@@ -983,7 +990,7 @@ pub inline fn sliceToDatumCStringZ(slice: [:0]const u8) !pg.Datum {
 
 pub inline fn sliceToDatumText(slice: []const u8) !pg.Datum {
     const text = pg.cstring_to_text_with_len(slice.ptr, @intCast(slice.len));
-    return pg.PointerGetDatum(text);
+    return pointerToDatum(text);
 }
 
 pub inline fn sliceToDatumTextZ(slice: [:0]const u8) !pg.Datum {

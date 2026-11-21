@@ -158,7 +158,7 @@ pub const HeapTuple = struct {
         _ = att;
 
         var isnull: bool = false;
-        const d = pg.heap_getattr(self.tuple, @intCast(attno), self.tupdesc.ptr, &isnull);
+        const d = pg.pgzx_heap_getattr(self.tuple, @intCast(attno), self.tupdesc.ptr, &isnull);
         return .{ .value = if (isnull) 0 else d, .isnull = isnull };
     }
 

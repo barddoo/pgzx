@@ -2,7 +2,7 @@
 # Development image for pgzx.
 #
 # Installs Zig and PostgreSQL (with dev headers) directly.
-# Supports PostgreSQL 15–18 (default: 18).
+# Supports PostgreSQL 15–19 (default: 19).
 #
 # Build:
 #   docker build -f dev/docker/Dockerfile.standalone -t pgzx-standalone .
@@ -15,8 +15,8 @@
 # Run (mounts the repo at /workspace):
 #   docker run -it --rm -v "$PWD:/workspace" pgzx-standalone
 
-ARG PG_MAJOR=18
-ARG PG_VERSION=18.7-1.pgdg13+5
+ARG PG_MAJOR=19
+ARG PG_VERSION=19.0-2.pgdg13+1
 ARG ZIG_VERSION=0.17.1
 
 # Pinned to the trixie-slim manifest list digest so rebuilds use the same base.

@@ -44,7 +44,7 @@ class Pgzx < Formula
   def caveats
     <<~EOS
       pgzx needs PostgreSQL with development headers:
-        brew install postgresql@18 && brew link --force postgresql@18
+        brew install postgresql@19 && brew link --force postgresql@19
       Check the setup with:
         pgzx doctor
     EOS

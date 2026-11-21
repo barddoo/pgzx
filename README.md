@@ -44,7 +44,7 @@ The reference documentation is available at [here](https://barddoo.github.io/pgz
 
 ### Getting Started
 
-You need **Zig 0.17+** and **PostgreSQL 15–18 with development headers**
+You need **Zig 0.17+** and **PostgreSQL 15–19 with development headers**
 (`postgresql-server-dev-NN` on Debian/Ubuntu, `postgresql@NN` on Homebrew).
 
 Prebuilt commands are published for macOS (Apple silicon and Intel) and Linux
@@ -298,7 +298,7 @@ This builds a dedicated `{name}_unit` library with `testfn = true`, deploys it, 
 
 pgzx is under heavy development. Expect breaking changes and potential instability. If you need help, open an issue in this repository.
 
-PostgreSQL 15, 16, 17 and 18 are supported: the examples and unit tests are compiled and run against all four in CI. PostgreSQL 14 is not supported yet.
+PostgreSQL 15, 16, 17, 18 and 19 are supported: the examples and unit tests are compiled and run against all five in CI. PostgreSQL 14 is not supported yet.
 
 [ROADMAP.md](ROADMAP.md) tracks the feature status relative to [pgrx](https://github.com/pgcentralfoundation/pgrx):
 

@@ -93,8 +93,8 @@ pub fn HTab(comptime Context: type) type {
             entrysize: ?usize = null, // total user element size in bytes
 
             num_partitions: ?usize = null, // # partitions (must be power of 2)
-            segment_size: ?usize = null, // # entries in a segment
-            dir: ?DirConfig = null, // directory size and max size
+            segment_size: ?usize = null, // # entries in a segment (ignored on PG19+)
+            dir: ?DirConfig = null, // directory size and max size (ignored on PG19+)
             hash: HashValueFunc = Context.DefaultHash, // hash function
             match: pg.HashCompareFunc = null, // key comparison function
             keycopy: pg.HashCopyFunc = null, // key copying function
@@ -108,11 +108,8 @@ pub fn HTab(comptime Context: type) type {
             }
 
             pub fn initHashCtl(self: Options) pg.HASHCTL {
-                return .{
+                var hctl: pg.HASHCTL = .{
                     .num_partitions = @intCast(self.num_partitions orelse 0),
-                    .ssize = @intCast(self.segment_size orelse 0),
-                    .dsize = @intCast(if (self.dir) |d| d.init_size else 0),
-                    .max_dsize = @intCast(if (self.dir) |d| d.max_dsize else pg.NO_MAX_DSIZE),
                     .keysize = @intCast(if (self.keysize) |k| k else Context.keySize()),
                     .entrysize = @intCast(if (self.entrysize) |e| e else Context.entrySize()),
                     .hash = if (self.hash == .Func) self.hash.Func else null,
@@ -122,13 +119,24 @@ pub fn HTab(comptime Context: type) type {
                     .hcxt = self.memctx,
                     .hctl = null,
                 };
+                // PG19 removed segmented hash tables, and with them the
+                // ssize/dsize/max_dsize fields.
+                if (comptime pg.PG_VERSION_NUM < 190000) {
+                    hctl.ssize = @intCast(self.segment_size orelse 0);
+                    hctl.dsize = @intCast(if (self.dir) |d| d.init_size else 0);
+                    hctl.max_dsize = @intCast(if (self.dir) |d| d.max_dsize else pg.NO_MAX_DSIZE);
+                }
+                return hctl;
             }
 
             pub fn initFlags(self: Options) c_int {
                 var flags: c_int = pg.HASH_ELEM;
                 flags |= if (self.num_partitions != null) pg.HASH_PARTITION else 0;
-                flags |= if (self.segment_size != null) pg.HASH_SEGMENT else 0;
-                flags |= if (self.dir != null) pg.HASH_DIRSIZE else 0;
+                // HASH_SEGMENT and HASH_DIRSIZE were removed in PG19.
+                if (comptime pg.PG_VERSION_NUM < 190000) {
+                    flags |= if (self.segment_size != null) pg.HASH_SEGMENT else 0;
+                    flags |= if (self.dir != null) pg.HASH_DIRSIZE else 0;
+                }
                 flags |= switch (self.hash) {
                     .Strings => pg.HASH_STRINGS,
                     .Blobs => pg.HASH_BLOBS,

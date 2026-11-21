@@ -112,7 +112,8 @@ pub const TupleDesc = struct {
         switch (self.release) {
             .none => {},
             // ReleaseTupleDesc(): only reference-counted descriptors are released.
-            .refcount => if (self.ptr.*.tdrefcount >= 0) pg.DecrTupleDescRefCount(self.ptr),
+            .refcount => if (pg.pgzx_tupdesc_refcount(self.ptr) >= 0)
+                pg.DecrTupleDescRefCount(self.ptr),
             .free => pg.FreeTupleDesc(self.ptr),
         }
         self.release = .none;
@@ -120,31 +121,26 @@ pub const TupleDesc = struct {
 
     /// `pg_type` OID of the row type, `RECORDOID` for anonymous records.
     pub fn typeId(self: Self) pg.Oid {
-        return self.ptr.*.tdtypeid;
+        return pg.pgzx_tupdesc_typeid(self.ptr);
     }
 
     pub fn typmod(self: Self) i32 {
-        return self.ptr.*.tdtypmod;
+        return pg.pgzx_tupdesc_typmod(self.ptr);
     }
 
     /// Number of columns, including dropped ones.
     pub fn len(self: Self) usize {
-        return @intCast(self.ptr.*.natts);
+        return @intCast(pg.pgzx_tupdesc_natts(self.ptr));
     }
 
     /// Column `i` (0-based), or null if out of range.
     pub fn attr(self: Self, i: usize) ?*const Attribute {
         if (i >= self.len()) return null;
-        // Before PG18 the attributes are a flexible array member, which
-        // translate-c exposes as the `attrs()` accessor; the translated
-        // `TupleDescAttr` helper refers to a plain `attrs` field and does not
-        // compile there. PG18 moved to compact attributes plus a trailing
-        // attribute array, which only `TupleDescAttr` knows how to find.
-        if (comptime pg.PG_VERSION_NUM >= 180000) {
-            return pg.TupleDescAttr(self.ptr, @as(c_int, @intCast(i)));
-        } else {
-            return &self.ptr.*.attrs()[i];
-        }
+        // TupleDescAttr() is a macro before PG18 and a static inline function
+        // afterwards; either way the layout stays a C detail behind the shim
+        // (PG19's CompactAttribute has bitfields, which translate-c cannot
+        // translate).
+        return pg.pgzx_tupdesc_attr(self.ptr, @as(c_int, @intCast(i)));
     }
 
     /// Index (0-based) of the live column called `name`.
@@ -241,11 +237,12 @@ pub const TestSuite_TupleDesc = struct {
         defer spi.finish();
 
         var desc = try TupleDesc.forRowType(try namespaceRowType(), -1);
-        const refs = desc.ptr.*.tdrefcount;
+        const refs = pg.pgzx_tupdesc_refcount(desc.ptr);
         try testing.expect(refs >= 1);
         try testing.expectEqual(TupleDesc.Release.refcount, desc.release);
         desc.deinit();
-        try testing.expectEqual(refs - 1, TupleDesc.fromPg(desc.ptr).?.ptr.*.tdrefcount);
+        const after = pg.pgzx_tupdesc_refcount(TupleDesc.fromPg(desc.ptr).?.ptr);
+        try testing.expectEqual(refs - 1, after);
     }
 
     pub fn testCreateRecord() !void {
@@ -267,7 +264,7 @@ pub const TestSuite_TupleDesc = struct {
         var desc = try TupleDesc.createRecord(&.{.{ .name = "x", .type_oid = pg.INT4OID }});
         const raw = desc.intoPg();
         desc.deinit(); // no-op after intoPg
-        try testing.expectEqual(@as(usize, 1), @as(usize, @intCast(raw.*.natts)));
+        try testing.expectEqual(@as(usize, 1), @as(usize, @intCast(pg.pgzx_tupdesc_natts(raw))));
         pg.FreeTupleDesc(raw);
     }
 };

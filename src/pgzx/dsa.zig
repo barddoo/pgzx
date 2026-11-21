@@ -22,9 +22,15 @@ pub const Pointer = pg.dsa_pointer;
 /// is reported in wait events. Tranches are per-process here: register the id
 /// in every process that uses the area.
 pub fn newTranche(comptime name: [:0]const u8) c_int {
-    const id = pg.LWLockNewTrancheId();
-    pg.LWLockRegisterTranche(id, name.ptr);
-    return id;
+    // PostgreSQL 19 takes the tranche name in LWLockNewTrancheId and dropped
+    // LWLockRegisterTranche.
+    if (comptime pg.PG_VERSION_NUM >= 190000) {
+        return pg.LWLockNewTrancheId(name.ptr);
+    } else {
+        const id = pg.LWLockNewTrancheId();
+        pg.LWLockRegisterTranche(id, name.ptr);
+        return id;
+    }
 }
 
 /// Creates a new area in a fresh dynamic shared memory segment.

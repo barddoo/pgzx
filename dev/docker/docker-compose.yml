@@ -13,10 +13,10 @@ services:
       context: ../..
       dockerfile: dev/docker/Dockerfile.standalone
       args:
-        PG_MAJOR: "18"
-        PG_VERSION: "18.7-1.pgdg13+5"
+        PG_MAJOR: "19"
+        PG_VERSION: "19.0-2.pgdg13+1"
         ZIG_VERSION: "0.17.1"
-    image: pgzx-standalone:pg18
+    image: pgzx-standalone:pg19
     volumes:
       - ../..:/workspace
     working_dir: /workspace

@@ -146,7 +146,7 @@ pub inline fn pgTriggerCall(
         else => impl(tg_data),
     };
     if (result != null) {
-        return pg.PointerGetDatum(result);
+        return datum.pointerToDatum(result);
     }
     return 0;
 }
@@ -255,7 +255,7 @@ fn pgCallSetReturning(
             if (pg.pgzx_srf_result_tupdesc(fcinfo, &tupdesc) != pg.PGZX_SRF_RESULT_COMPOSITE) {
                 elog.throwAsPostgresError(src, error.NotACompositeType);
             }
-            if (tupdesc.*.natts != srf.columnCount(R.Item)) {
+            if (pg.pgzx_tupdesc_natts(tupdesc) != srf.columnCount(R.Item)) {
                 elog.throwAsPostgresError(src, error.IncorrectAttributeCount);
             }
             state.tupdesc = tupdesc;

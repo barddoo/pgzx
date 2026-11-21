@@ -7,6 +7,9 @@ All notable changes to pgzx are recorded here. The format follows
 
 ### Added
 
+- PostgreSQL 19 support: the library, examples and CI matrix now cover
+  PostgreSQL 15–19. `libpqsrv_connect_complete`, the PG19 `SpinLockFree`
+  removal and the `postgres.h`-first translation are handled.
 - `pgzx.latch`: typed `my`, `set`, `reset`, `wait` and `waitOrSocket`, returning
   a `Result` with named fields instead of raw wake-event bits.
 - `pgzx.bgworker.waitForStartup` and `waitForShutdown` for dynamic workers.
@@ -49,6 +52,9 @@ All notable changes to pgzx are recorded here. The format follows
 
 ### Changed
 
+- The default PostgreSQL version is now 19: the Docker image and Compose
+  service, the CI end-to-end jobs, the documentation and `pgzx doctor` all
+  point at PostgreSQL 19. The test matrix still covers 15–19.
 - `pgzx.bgworker.registerDynamic` sets `bgw_notify_pid` to the calling backend.
   Without it, `WaitForBackgroundWorker*` never returned.
 - `pgzx.pq` `waitReady` uses the latch wrapper and reports postmaster death.

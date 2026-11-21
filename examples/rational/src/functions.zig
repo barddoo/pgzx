@@ -172,7 +172,7 @@ inline fn fromDatum(d: pg.Datum) Rational {
 fn makeDatum(r: Rational) !pg.Datum {
     const p = try pgzx.mem.PGCurrentContextAllocator.create(Rational);
     p.* = r;
-    return pg.PointerGetDatum(p);
+    return pgzx.datum.pointerToDatum(p);
 }
 
 const PGErrorStack = pgzx.err.PGErrorStack;

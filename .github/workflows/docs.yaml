@@ -29,7 +29,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
-      - name: Install PostgreSQL 18
+      - name: Install PostgreSQL 19
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
@@ -38,8 +38,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            postgresql-server-dev-18 libssl-dev libkrb5-dev
-          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
+            postgresql-server-dev-19 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/19/bin/pg_config" >>"$GITHUB_ENV"
       - name: Generate docs
         run: |
           zig build cli

@@ -7,9 +7,9 @@ The `pgzx` command and your system toolchain provide everything.
 ## Prerequisites
 
 - **Zig 0.17 or newer** — https://ziglang.org/download/
-- **PostgreSQL 15–18 with development headers**
-  - Debian/Ubuntu: `sudo apt install postgresql-18 postgresql-server-dev-18 libssl-dev libkrb5-dev`
-  - macOS: `brew install postgresql@18 openssl@3 krb5 && brew link --force postgresql@18`
+- **PostgreSQL 15–19 with development headers**
+  - Debian/Ubuntu: `sudo apt install postgresql-19 postgresql-server-dev-19 libssl-dev libkrb5-dev`
+  - macOS: `brew install postgresql@19 openssl@3 krb5 && brew link --force postgresql@19`
 - **pgzx** — `brew install barddoo/tap/pgzx`, or run the install script from the
   [releases page](https://github.com/barddoo/pgzx/releases/latest).
 

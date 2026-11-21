@@ -66,9 +66,9 @@ fn doctorPg(ctx: *Ctx, failures: *usize) !void {
             "  [fail] {s} not found: install PostgreSQL with development headers\n",
             .{pg_config},
         );
-        try ctx.out.writeAll("         Debian: sudo apt install postgresql-18 " ++
-            "postgresql-server-dev-18\n");
-        try ctx.out.writeAll("         macOS:  brew install postgresql@18\n");
+        try ctx.out.writeAll("         Debian: sudo apt install postgresql-19 " ++
+            "postgresql-server-dev-19\n");
+        try ctx.out.writeAll("         macOS:  brew install postgresql@19\n");
         failures.* += 1;
         return;
     }

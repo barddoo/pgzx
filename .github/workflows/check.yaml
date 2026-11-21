@@ -51,7 +51,7 @@ jobs:
       # One failing PostgreSQL version must not hide the state of the others.
       fail-fast: false
       matrix:
-        pg: ["15", "16", "17", "18"]
+        pg: ["15", "16", "17", "18", "19"]
     env:
       PG_CONFIG: /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
     steps:
@@ -100,12 +100,12 @@ jobs:
           if-no-files-found: ignore
 
   linux:
-    name: End-to-end (Ubuntu, PostgreSQL 18)
+    name: End-to-end (Ubuntu, PostgreSQL 19)
     runs-on: ubuntu-24.04
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install PostgreSQL 18
+      - name: Install PostgreSQL 19
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
@@ -114,11 +114,11 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            postgresql-18 postgresql-server-dev-18 libssl-dev libkrb5-dev
-          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
+            postgresql-19 postgresql-server-dev-19 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/19/bin/pg_config" >>"$GITHUB_ENV"
       - name: Let the runner install extensions
         run: |
-          pg_config=/usr/lib/postgresql/18/bin/pg_config
+          pg_config=/usr/lib/postgresql/19/bin/pg_config
           sudo chown -R "$USER" \
             "$("$pg_config" --pkglibdir)" \
             "$("$pg_config" --sharedir)/extension"
@@ -170,15 +170,15 @@ jobs:
           if-no-files-found: ignore
 
   macos:
-    name: End-to-end (macOS, PostgreSQL 18)
+    name: End-to-end (macOS, PostgreSQL 19)
     runs-on: macos-15
     steps:
       - name: git checkout
         uses: actions/checkout@v7
       - name: Install PostgreSQL
         run: |
-          brew install postgresql@18 openssl@3 krb5
-          echo "PG_CONFIG=$(brew --prefix postgresql@18)/bin/pg_config" >>"$GITHUB_ENV"
+          brew install postgresql@19 openssl@3 krb5
+          echo "PG_CONFIG=$(brew --prefix postgresql@19)/bin/pg_config" >>"$GITHUB_ENV"
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
@@ -207,7 +207,7 @@ jobs:
     steps:
       - name: git checkout
         uses: actions/checkout@v7
-      - name: Install PostgreSQL 18 headers
+      - name: Install PostgreSQL 19 headers
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
@@ -216,8 +216,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            postgresql-server-dev-18 libssl-dev libkrb5-dev
-          echo "PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config" >>"$GITHUB_ENV"
+            postgresql-server-dev-19 libssl-dev libkrb5-dev
+          echo "PG_CONFIG=/usr/lib/postgresql/19/bin/pg_config" >>"$GITHUB_ENV"
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:

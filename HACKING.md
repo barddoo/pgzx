@@ -39,7 +39,7 @@ pgzx extension on your machine. It assumes you have cloned this repository.
 ## 1. Prerequisites
 
 - **Zig 0.17 or newer** — [ziglang.org/download](https://ziglang.org/download/).
-- **PostgreSQL 15–18** with development headers. Debian/Ubuntu:
+- **PostgreSQL 15–19** with development headers. Debian/Ubuntu:
   `postgresql-server-dev-NN`; macOS: `postgresql@NN`; Fedora: `postgresql-devel`.
 - A C toolchain and the OpenSSL/Kerberos headers (`libssl-dev libkrb5-dev`, or
   `openssl@3 krb5` on Homebrew).
@@ -74,8 +74,8 @@ writable. Each failure is printed with the command that fixes it.
 ### Option A — Homebrew (macOS)
 
 ```sh
-brew install postgresql@18 openssl@3 krb5 zig
-brew link --force postgresql@18
+brew install postgresql@19 openssl@3 krb5 zig
+brew link --force postgresql@19
 ```
 
 Homebrew prefixes are owned by your user, so installing the extension into
@@ -98,7 +98,7 @@ zig version   # should print 0.17.1
 Install PostgreSQL and its development headers:
 
 ```sh
-PG_MAJOR=18   # or 15 / 16 / 17
+PG_MAJOR=19   # or 15 / 16 / 17 / 18
 curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
   | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
 echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
@@ -134,7 +134,7 @@ sudo chown -R "$(id -un)" \
 ```sh
 # Build once (~3 min; cached afterwards). Pick a PostgreSQL version if needed.
 docker build \
-  --build-arg PG_MAJOR=18 \
+  --build-arg PG_MAJOR=19 \
   -f dev/docker/Dockerfile.standalone \
   -t pgzx-standalone \
   .
@@ -597,7 +597,7 @@ unit tests, then runs each example's `ci/run.sh` (build, create extension, unit
 tests, regression tests, drop). It prints `Success!` on success.
 
 The GitHub workflows run the same flow against PGDG packages for PostgreSQL
-15–18, plus end-to-end jobs and a release gate (`release.yaml` calls
+15–19, plus end-to-end jobs and a release gate (`release.yaml` calls
 `check.yaml`):
 
 - `lint` — shellcheck, shfmt and actionlint (the same tools as the local
@@ -606,7 +606,7 @@ The GitHub workflows run the same flow against PGDG packages for PostgreSQL
   version.
 - `linux` — installs the release bundle with `install.sh --local`, then
   scaffolds, builds, and runs unit + regression tests.
-- `macos` — Homebrew PostgreSQL 18 + Zig, runs `pgzx doctor` and compiles the
+- `macos` — Homebrew PostgreSQL 19 + Zig, runs `pgzx doctor` and compiles the
   template.
 - `templates` — scaffolds the template and asserts the release stamping writes
   the tag URL and package hash.
