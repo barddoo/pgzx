@@ -5,11 +5,53 @@ All notable changes to pgzx are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-21
+
 ### Added
 
 - PostgreSQL 19 support: the library, examples and CI matrix now cover
   PostgreSQL 15–19. `libpqsrv_connect_complete`, the PG19 `SpinLockFree`
   removal and the `postgres.h`-first translation are handled.
+- `pgzx init` prints the created cluster (data directory, socket, log, port,
+  user, database) and the next commands, and accepts `--force`/`-f` to delete
+  an existing cluster before recreating it. Without `--force` it refuses to
+  overwrite one.
+- `pgzx env [cluster]` writes `PGDATA`, `PGPORT`, `PGUSER`, `PGDATABASE` and
+  `PGZX_CLUSTER` from the cluster's `cluster.conf`, so `psql` and `pg_ctl` need
+  no flags. `start`/`stop`/`status` take the same optional cluster name and fall
+  back to `PGZX_CLUSTER`, then `postgres`.
+- `pgzx init`, `start` and `doctor` reject unix socket paths longer than the
+  platform's `sun_path` (107 bytes on Linux, 103 on macOS) and suggest
+  `PG_SOCKET_DIR`.
+- Documentation site: an Astro/Starlight project in `docs/`, published at
+  <https://pgzx.barddoo.com/>, with installation, guides, the build system and
+  contributing pages, and the Zig Autodoc reference at `/api/`.
+
+### Changed
+
+- The default PostgreSQL version is now 19: the Docker image and Compose
+  service, the CI end-to-end jobs, the documentation and `pgzx doctor` all
+  point at PostgreSQL 19. The test matrix still covers 15–19.
+- `eval "$(pgzx env)"` now also exports the cluster's `PGUSER` and `PGDATABASE`
+  (default `postgres`), so a bare `psql` connects to the project cluster instead
+  of using the OS user.
+- `zig build docs` now only installs the Autodoc bundle into
+  `zig-out/share/pgzx/docs`; it no longer copies it into `./docs`, which holds
+  the site sources. The site's `bun run build` merges the bundle into
+  `dist/api`.
+- The docs site deploys from `main` only. Pull requests and releases build it
+  without deploying, so a broken docs build blocks a release but cannot
+  overwrite the deployment from `main`.
+
+### Removed
+
+- `zig build serve_docs`; the site's `bun run dev` serves both the prose and the
+  API bundle. `HACKING.md` and `docs/BUILD.md` moved into the site.
+
+## [0.2.0] - 2026-11-20
+
+### Added
+
 - `pgzx.latch`: typed `my`, `set`, `reset`, `wait` and `waitOrSocket`, returning
   a `Result` with named fields instead of raw wake-event bits.
 - `pgzx.bgworker.waitForStartup` and `waitForShutdown` for dynamic workers.
@@ -38,21 +80,7 @@ All notable changes to pgzx are recorded here. The format follows
   `fingerprint` and `version`. Works from a checkout and from an installed
   bundle; `pgzx new` supports `--template`, `--pgzx-ref` and `--no-fetch`, and
   pins the dependency URL and hash.
-- `pgzx init` prints the created cluster (data directory, socket, log, port,
-  user, database) and the next commands, and accepts `--force`/`-f` to delete
-  an existing cluster before recreating it. Without `--force` it refuses to
-  overwrite one.
-- `pgzx env [cluster]` writes `PGDATA`, `PGPORT`, `PGUSER`, `PGDATABASE` and
-  `PGZX_CLUSTER` from the cluster's `cluster.conf`, so `psql` and `pg_ctl` need
-  no flags. `start`/`stop`/`status` take the same optional cluster name and fall
-  back to `PGZX_CLUSTER`, then `postgres`.
-- `pgzx init`, `start` and `doctor` reject unix socket paths longer than the
-  platform's `sun_path` (107 bytes on Linux, 103 on macOS) and suggest
-  `PG_SOCKET_DIR`.
 - `templates/default`: project template with `Makefile` and `.envrc`.
-- Documentation site: an Astro/Starlight project in `docs/`, published at
-  <https://pgzx.barddoo.com/>, with installation, guides, the build system and
-  contributing pages, and the Zig Autodoc reference at `/api/`.
 - `install.sh` and `tools/build-dist.sh`: per-target release bundles
   (`pgzx-cli-<tag>-<target>.tar.gz`, `pgzx-template-<tag>.tar.gz`,
   `SHA256SUMS`) with the CLI cross-compiled for macOS (aarch64/x86_64) and Linux
@@ -66,9 +94,6 @@ All notable changes to pgzx are recorded here. The format follows
 
 ### Changed
 
-- The default PostgreSQL version is now 19: the Docker image and Compose
-  service, the CI end-to-end jobs, the documentation and `pgzx doctor` all
-  point at PostgreSQL 19. The test matrix still covers 15–19.
 - `pgzx.bgworker.registerDynamic` sets `bgw_notify_pid` to the calling backend.
   Without it, `WaitForBackgroundWorker*` never returned.
 - `pgzx.pq` `waitReady` uses the latch wrapper and reports postmaster death.
@@ -79,15 +104,6 @@ All notable changes to pgzx are recorded here. The format follows
 - `pgzx.varatt` is documented as internal, with an accurate test status.
 - Cluster state honours `PGZX_CLUSTER_DIR` and `PG_SOCKET_DIR`, so it no longer
   has to live inside the PostgreSQL installation prefix.
-- `eval "$(pgzx env)"` now also exports the cluster's `PGUSER` and `PGDATABASE`
-  (default `postgres`), so a bare `psql` connects to the project cluster instead
-  of using the OS user.
-- `zig build docs` now only installs the Autodoc bundle into
-  `zig-out/share/pgzx/docs`; it no longer copies it into `./docs`, which holds
-  the site sources. The site's `bun run build` merges the bundle into
-  `dist/api`.
-- The release workflow also builds and publishes the docs site, so a broken docs
-  build blocks a release.
 
 ### Removed
 
@@ -97,8 +113,6 @@ All notable changes to pgzx are recorded here. The format follows
 - `dev/bin/pglocal` and `dev/bin/pguse`; the cluster now lives in
   `<project>/out/pg` and `PG_CONFIG` selects the PostgreSQL version.
 - `tools/check-templates.sh`; there is a single template.
-- `zig build serve_docs`; the site's `bun run dev` serves both the prose and the
-  API bundle. `HACKING.md` and `docs/BUILD.md` moved into the site.
 
 ### Fixed
 

@@ -1,10 +1,11 @@
 ---
 name: Release
 
-# Runs when a version tag is pushed: re-runs the full check, publishes the docs
-# site, and creates a GitHub release. pgzx is consumed as a Zig package, so the
-# release notes carry the `zig fetch` line (with the package hash) for the
-# tagged source tarball.
+# Runs when a version tag is pushed: re-runs the full check, builds the docs
+# site (build only, so a broken site blocks the release but cannot overwrite the
+# deployment from main), and creates a GitHub release. pgzx is consumed as a Zig
+# package, so the release notes carry the `zig fetch` line (with the package
+# hash) for the tagged source tarball.
 
 on:
   push:
@@ -27,8 +28,8 @@ jobs:
     name: Docs
     needs: check
     uses: ./.github/workflows/docs.yaml
-    # The called workflow builds the site and deploys it to Pages, which needs
-    # these on top of the caller's `contents: read`.
+    # Kept so the called workflow's permission set is valid; its deploy job is
+    # skipped for tags (`if: github.ref == 'refs/heads/main'`).
     permissions:
       contents: read
       pages: write

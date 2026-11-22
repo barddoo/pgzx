@@ -2,22 +2,23 @@
 name: Docs
 
 # Builds the Starlight site in docs/ plus the Zig Autodoc bundle and publishes
-# the merged result to GitHub Pages. Runs on every push to main, and is called
-# by release.yaml so a broken docs build blocks a release and the tagged commit
-# is what gets published.
+# the merged result to GitHub Pages. Pull requests and releases only build the
+# site (a broken build blocks a release); pushes to main build and deploy, so a
+# release can never publish an older site over a newer main.
 
 on:
   push:
     branches:
       - main
+  pull_request:
   workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  group: docs
+  cancel-in-progress: false
 
 jobs:
   docs:
@@ -76,6 +77,8 @@ jobs:
   deploy-docs:
     name: Deploy docs
     needs: docs
+    # Releases and pull requests build the site only; main owns the deployment.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       pages: write

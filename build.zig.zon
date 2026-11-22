@@ -1,7 +1,7 @@
 .{
     .name = .pgzx,
     .fingerprint = 0x8cedca5730bac13e,
-    .version = "0.1.0",
+    .version = "0.3.0",
     .dependencies = .{
         .translate_c = .{
             .url = "git+https://codeberg.org/ziglang/translate-c#02ff0c523fb92a38939b04d0145c4a9602a74d56",
