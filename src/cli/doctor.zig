@@ -17,7 +17,11 @@ const version = context.version;
 const pgConfig = environment.pgConfig;
 const pgConfigBin = environment.pgConfigBin;
 const pgHome = environment.pgHome;
+const portForClusterDir = environment.portForClusterDir;
+const resolveClusterName = environment.resolveClusterName;
 const resolveIncludeDirs = environment.resolveIncludeDirs;
+const socketPath = environment.socketPath;
+const socketPathLimit = environment.socketPathLimit;
 
 pub fn cmdDoctor(ctx: *Ctx) !void {
     var failures: usize = 0;
@@ -97,6 +101,31 @@ fn doctorCluster(ctx: *Ctx, root: []const u8, failures: *usize) !void {
     } else {
         try ctx.out.print("  [ok]   cluster dir {s} (will be created)\n", .{cluster_dir});
     }
+    try doctorSocketPath(ctx, cluster_dir, failures);
+}
+
+fn doctorSocketPath(ctx: *Ctx, cluster_base: []const u8, failures: *usize) !void {
+    const limit = socketPathLimit();
+    if (limit == 0) return;
+    const name = resolveClusterName(ctx, &.{});
+    const cluster_dir = try pathJoin(ctx, &.{ cluster_base, name });
+    const socket_dir = ctx.get("PG_SOCKET_DIR") orelse
+        try pathJoin(ctx, &.{ cluster_base, "run" });
+    const port = try portForClusterDir(ctx, cluster_dir);
+    const path = try socketPath(ctx, socket_dir, port);
+    if (path.len <= limit) {
+        try ctx.out.print("  [ok]   socket path {s}\n", .{path});
+        return;
+    }
+    try ctx.out.print("  [fail] unix socket path is {d} bytes (max {d})\n", .{
+        path.len,
+        limit,
+    });
+    try ctx.out.print("         {s}\n", .{path});
+    try ctx.out.print("         set PG_SOCKET_DIR to a shorter directory, e.g. /tmp/pgzx-{s}\n", .{
+        name,
+    });
+    failures.* += 1;
 }
 
 fn doctorTemplates(ctx: *Ctx) !void {

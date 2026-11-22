@@ -35,6 +35,23 @@ fail() {
 	exit 1
 }
 
+# `pgzx env` must export the complete connection contract: PGDATA and PGPORT are
+# what make plain `pg_ctl`/`psql` work, PGUSER/PGDATABASE what make psql connect
+# to the project cluster.
+check_cluster_env() {
+	local var
+	for var in PGDATA PGPORT PGUSER PGDATABASE PGHOST PGZX_CLUSTER; do
+		if [ -z "${!var:-}" ]; then
+			fail "pgzx env did not export $var"
+		fi
+	done
+	if [ ! -f "$PGDATA/PG_VERSION" ]; then
+		fail "PGDATA=$PGDATA is not an initialized cluster"
+	fi
+}
+
+check_cluster_env
+
 cleanup() {
 	if [ "$started_server" = 1 ]; then
 		pgzx stop 2>/dev/null || true
@@ -119,6 +136,11 @@ if ! pgzx status >/dev/null 2>&1; then
 	pgzx start || fail "Failed to start PostgreSQL"
 	started_server=1
 fi
+
+# PGDATA from `pgzx env` is what makes plain pg_ctl/psql work; failing here
+# means the env contract regressed.
+pg_ctl status >/dev/null || fail "pg_ctl cannot see PGDATA=$PGDATA"
+psql -c 'select 1' >/dev/null || fail "psql with the pgzx env failed"
 
 echo -e "\n\nRun pgzx unit tests:"
 if ! test_pgzx; then

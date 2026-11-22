@@ -1,21 +1,22 @@
 ---
 name: Docs
 
-# Builds the API docs and publishes them to GitHub Pages on every push to main,
-# so the hosted docs track the tip of the default branch. Releases do not touch
-# Pages; see release.yaml.
+# Builds the Starlight site in docs/ plus the Zig Autodoc bundle and publishes
+# the merged result to GitHub Pages. Runs on every push to main, and is called
+# by release.yaml so a broken docs build blocks a release and the tagged commit
+# is what gets published.
 
 on:
   push:
     branches:
       - main
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
   group: docs-${{ github.ref }}
-  # A newer push to main supersedes an in-flight docs build/deploy.
   cancel-in-progress: true
 
 jobs:
@@ -40,15 +41,37 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             postgresql-server-dev-19 libssl-dev libkrb5-dev
           echo "PG_CONFIG=/usr/lib/postgresql/19/bin/pg_config" >>"$GITHUB_ENV"
-      - name: Generate docs
+      - name: Generate API docs
         run: |
           zig build cli
           eval "$(./zig-out/bin/pgzx env)"
           zig build docs
+          # `bun run build` re-runs `zig build docs` through sync-api.ts, so the
+          # environment it needs has to survive into the next step.
+          {
+            echo "PGZX_C_INCLUDE_DIRS=$PGZX_C_INCLUDE_DIRS"
+            echo "ZIG_LOCAL_CACHE_DIR=$ZIG_LOCAL_CACHE_DIR"
+          } >>"$GITHUB_ENV"
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('docs/bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+      - name: Install site dependencies
+        working-directory: docs
+        run: bun ci
+      - name: Build site
+        working-directory: docs
+        run: bun run build
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: zig-out/share/pgzx/docs
+          path: docs/dist
 
   deploy-docs:
     name: Deploy docs

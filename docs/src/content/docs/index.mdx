@@ -1,0 +1,77 @@
+---
+title: Overview
+description: Create PostgreSQL extensions with Zig.
+template: splash
+hero:
+  title: Create PostgreSQL extensions with Zig
+  tagline: pgzx wraps the Postgres C APIs (errors, memory contexts, the function manager, SPI, hooks, background workers) and gives you a build helper that produces the SQL script, installs the library and runs the tests.
+  actions:
+    - text: Get started
+      link: /start/install/
+      icon: right-arrow
+    - text: API reference
+      link: /api/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Where to go next
+
+<CardGrid>
+  <Card title="Installation" icon="rocket">
+    Install the `pgzx` command, point it at your PostgreSQL, and scaffold an
+    extension.
+  </Card>
+  <Card title="Guides" icon="open-book">
+    Logging and errors, memory context allocators, the function manager,
+    set-returning functions, SQL schema generation and tests.
+  </Card>
+  <Card title="Build system" icon="setting">
+    How an extension's `build.zig` is wired, the three-file source layout, and
+    how `zig build` produces the extension SQL.
+  </Card>
+  <Card title="API reference" icon="document">
+    The full Zig API, generated from the source with `zig build docs`.
+  </Card>
+</CardGrid>
+
+## Why Zig?
+
+[Zig](https://ziglang.org/) is a small, simple language that aims to be a
+"modern C" with safe memory management, compile-time execution (comptime), and a
+rich standard library. It speaks the C ABI, works with C pointers and types
+directly, and can import and translate C headers, so a Zig extension can do
+anything a C extension can, with a modern language on top.
+
+In practice you still need to understand a lot of Postgres internals, and
+Postgres leans on macros that cannot always be translated automatically. pgzx
+provides the Zig modules for those cases.
+
+```zig
+const pgzx = @import("pgzx");
+
+comptime {
+    pgzx.PG_MODULE_MAGIC();
+    pgzx.PG_FUNCTION_V1("char_count_zig", char_count_zig);
+}
+
+fn char_count_zig(input_text: []const u8, target_char: []const u8) !i64 {
+    if (target_char.len > 1) {
+        return elog.Error(@src(), "Target char is more than one byte", .{});
+    }
+    return @intCast(std.mem.count(u8, input_text, target_char));
+}
+```
+
+## Status
+
+pgzx is under heavy development: expect breaking changes and potential
+instability. PostgreSQL 15, 16, 17, 18 and 19 are supported: the examples and
+unit tests are compiled and run against all five in CI.
+
+[ROADMAP.md](https://github.com/barddoo/pgzx/blob/main/ROADMAP.md) tracks the
+feature status relative to [pgrx](https://github.com/pgcentralfoundation/pgrx):
+SQL/DDL generation, set-returning functions, composite and custom types, arrays,
+operators and casts, SPI, GUCs, background workers and heap tuple access are
+done; triggers, aggregates and `zig build package` are planned.

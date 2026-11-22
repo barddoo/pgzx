@@ -171,11 +171,11 @@ pub fn usage(ctx: *Ctx) !void {
         \\
         \\Commands:
         \\  new <name> [dir]   Create a new extension project
-        \\  env                Print export lines for the current project
-        \\  init               Initialize the local PostgreSQL cluster
-        \\  start              Start the local PostgreSQL cluster
-        \\  stop               Stop the local PostgreSQL cluster
-        \\  status             Show the local PostgreSQL cluster status
+        \\  env [cluster]      Print export lines for the current project
+        \\  init [options]     Initialize the local PostgreSQL cluster
+        \\  start [cluster]    Start the local PostgreSQL cluster
+        \\  stop [cluster]     Stop the local PostgreSQL cluster
+        \\  status [cluster]   Show the local PostgreSQL cluster status
         \\  doctor             Check the development environment
         \\  fingerprint        Derive the build.zig.zon fingerprint with zig
         \\  version            Print the pgzx version
@@ -186,11 +186,20 @@ pub fn usage(ctx: *Ctx) !void {
         \\  --pgzx-ref <ref>       pgzx git ref to depend on (default: release tag)
         \\  --no-fetch             Do not resolve the dependency hash with zig fetch
         \\
+        \\init options:
+        \\  -p <port>              Port for the cluster database
+        \\  -s <lib>               shared_preload_libraries
+        \\  -i <dir>               Directory with *.sql init scripts
+        \\  -c <dir>               Directory with a custom postgresql.conf
+        \\  -f, --force            Delete an existing cluster and initialize it again
+        \\
         \\Environment:
         \\  PGZX_DEFAULT_TEMPLATE  Template used when --template is omitted
         \\  PGZX_ROOT              Installed pgzx share directory (auto-detected)
         \\  PG_CONFIG              pg_config to use (default: pg_config)
         \\  PGZX_CLUSTER_DIR       Cluster state directory (default: <project>/out/pg)
+        \\  PGZX_CLUSTER           Cluster used when a command omits the name
+        \\  PG_SOCKET_DIR          Unix socket directory (default: <cluster base>/run)
         \\
     );
 }

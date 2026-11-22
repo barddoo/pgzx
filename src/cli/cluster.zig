@@ -7,17 +7,25 @@ const environment = @import("environment.zig");
 
 const Ctx = context.Ctx;
 const cwd = context.cwd;
+const exists = context.exists;
 const fail = context.fail;
 const makePath = context.makePath;
 const pathJoin = context.pathJoin;
 const readFile = context.readFile;
+const shellQuote = context.shellQuote;
 const trim = context.trim;
 const writeFile = context.writeFile;
 
+const ClusterState = environment.ClusterState;
 const Layout = environment.Layout;
+const checkSocketPath = environment.checkSocketPath;
 const clusterEnv = environment.clusterEnv;
 const layout = environment.layout;
 const pgConfig = environment.pgConfig;
+const portFromConf = environment.portFromConf;
+const resolveClusterName = environment.resolveClusterName;
+const resolvePort = environment.resolvePort;
+const writeClusterState = environment.writeClusterState;
 
 fn makeClusterDirs(ctx: *Ctx, l: *const Layout) !void {
     for ([_][]const u8{ l.cluster_dir, l.data_dir, l.log_dir, l.socket_dir }) |dir| {
@@ -39,6 +47,7 @@ const InitOptions = struct {
     preload: ?[]const u8 = null,
     init_path: ?[]const u8 = null,
     postgres_conf: ?[]const u8 = null,
+    force: bool = false,
 };
 
 fn parseInitArgs(ctx: *Ctx, args: []const [:0]const u8) !InitOptions {
@@ -51,7 +60,9 @@ fn parseInitArgs(ctx: *Ctx, args: []const [:0]const u8) !InitOptions {
             try initUsage(ctx);
             return error.Help;
         }
-        if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "-s") or
+        if (std.mem.eql(u8, arg, "--force") or std.mem.eql(u8, arg, "-f")) {
+            opts.force = true;
+        } else if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "-s") or
             std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "-c"))
         {
             i += 1;
@@ -79,6 +90,7 @@ fn initUsage(ctx: *Ctx) !void {
         \\  -s lib: shared_preload_libraries to configure
         \\  -i path: directory with *.sql init scripts
         \\  -c path: directory with a custom postgresql.conf
+        \\  -f, --force: delete an existing cluster and initialize it again
         \\
     );
 }
@@ -89,9 +101,15 @@ pub fn cmdInit(ctx: *Ctx, args: []const [:0]const u8) !void {
         return err;
     };
     const l = try layout(ctx, opts.cluster_name);
+    try preflightCluster(ctx, &l, opts.force);
+
+    // initdb and the init scripts run before the requested port and the
+    // custom config are applied, so they talk to the temporary server on 5432.
+    const init_port = opts.port orelse "5432";
+    try checkSocketPath(ctx, &l, init_port);
     try makeClusterDirs(ctx, &l);
 
-    var env = try clusterEnv(ctx, &l);
+    var env = try clusterEnv(ctx, &l, init_port);
     defer env.deinit();
 
     try runInitdb(ctx, &l, &env);
@@ -107,6 +125,73 @@ pub fn cmdInit(ctx: *Ctx, args: []const [:0]const u8) !void {
 
     if (opts.postgres_conf) |dir| try copyConfig(ctx, dir, l.data_dir);
     try writeClusterConfig(ctx, &l, &opts);
+
+    const state: ClusterState = .{
+        .name = opts.cluster_name,
+        .database = opts.database,
+        .user = opts.user,
+        .port = try finalPort(ctx, &l, opts.port),
+    };
+    try writeClusterState(ctx, &l, state);
+    try printInitSummary(ctx, &l, state);
+}
+
+/// The port the cluster will actually listen on: the `-p` override, else the
+/// value in the final `postgresql.conf` (which a `-c` config may set).
+fn finalPort(ctx: *Ctx, l: *const Layout, override: ?[]const u8) ![]const u8 {
+    if (override) |port| return port;
+    return portFromConf(ctx, l) orelse "5432";
+}
+
+fn directoryHasEntries(ctx: *Ctx, path: []const u8) bool {
+    var dir = cwd().openDir(ctx.io, path, .{ .iterate = true }) catch return false;
+    defer dir.close(ctx.io);
+    var it = dir.iterate();
+    return (it.next(ctx.io) catch null) != null;
+}
+
+fn preflightCluster(ctx: *Ctx, l: *const Layout, force: bool) !void {
+    const initialized = exists(ctx, l.data_dir) and directoryHasEntries(ctx, l.data_dir);
+    if (!initialized) {
+        // A half-created cluster dir (no data yet) is reused; --force clears it.
+        if (force and exists(ctx, l.cluster_dir)) try removeCluster(ctx, l);
+        return;
+    }
+    if (!force) {
+        return fail(
+            "cluster already exists at '{s}'\n" ++
+                "  use 'pgzx init --force' to delete it and initialize a fresh one",
+            .{l.cluster_dir},
+        );
+    }
+    try removeCluster(ctx, l);
+}
+
+fn removeCluster(ctx: *Ctx, l: *const Layout) !void {
+    var env = try clusterEnv(ctx, l, null);
+    defer env.deinit();
+    stopServer(ctx, l, &env);
+    cwd().deleteTree(ctx.io, l.cluster_dir) catch |err| {
+        return fail("cannot remove cluster at '{s}': {t}", .{ l.cluster_dir, err });
+    };
+}
+
+fn printInitSummary(ctx: *Ctx, l: *const Layout, state: ClusterState) !void {
+    try ctx.out.print("initialized cluster \"{s}\"\n", .{state.name});
+    try ctx.out.print("  data      {s}\n", .{l.data_dir});
+    try ctx.out.print("  socket    {s}\n", .{l.socket_dir});
+    try ctx.out.print("  log       {s}\n", .{l.log_file});
+    try ctx.out.print("  port      {s}\n", .{state.port});
+    try ctx.out.print("  user      {s}\n", .{state.user});
+    try ctx.out.print("  database  {s}\n", .{state.database});
+    try ctx.out.writeAll("\nnext:\n");
+    try ctx.out.print("  eval \"$(pgzx env {s})\"\n", .{
+        try shellQuote(ctx.arena, state.name),
+    });
+    try ctx.out.writeAll("  pgzx start\n");
+    try ctx.out.print("  psql -U {s} -c 'select version()'\n", .{
+        try shellQuote(ctx.arena, state.user),
+    });
 }
 
 fn runInitdb(ctx: *Ctx, l: *const Layout, env: *std.process.Environ.Map) !void {
@@ -213,10 +298,12 @@ fn copyConfig(ctx: *Ctx, src: []const u8, dest: []const u8) !void {
 }
 
 pub fn cmdStart(ctx: *Ctx, args: []const [:0]const u8) !void {
-    const cluster_name = if (args.len > 0) args[0] else "postgres";
+    const cluster_name = resolveClusterName(ctx, args);
     const l = try layout(ctx, cluster_name);
+    const port = try resolvePort(ctx, &l);
+    try checkSocketPath(ctx, &l, port);
     try makePath(ctx, l.socket_dir);
-    var env = try clusterEnv(ctx, &l);
+    var env = try clusterEnv(ctx, &l, port);
     defer env.deinit();
     const pg_ctl = try pathJoin(ctx, &.{ l.bin_dir, "pg_ctl" });
     const offset = try std.fmt.allocPrint(ctx.arena, "-k {s}", .{l.socket_dir});
@@ -235,9 +322,9 @@ pub fn cmdStart(ctx: *Ctx, args: []const [:0]const u8) !void {
 }
 
 pub fn cmdStop(ctx: *Ctx, args: []const [:0]const u8) !void {
-    const cluster_name = if (args.len > 0) args[0] else "postgres";
+    const cluster_name = resolveClusterName(ctx, args);
     const l = try layout(ctx, cluster_name);
-    var env = try clusterEnv(ctx, &l);
+    var env = try clusterEnv(ctx, &l, null);
     defer env.deinit();
     const pg_ctl = try pathJoin(ctx, &.{ l.bin_dir, "pg_ctl" });
     const res = try ctx.runEnv(&.{ pg_ctl, "-D", l.data_dir, "stop" }, null, &env);
@@ -247,9 +334,9 @@ pub fn cmdStop(ctx: *Ctx, args: []const [:0]const u8) !void {
 }
 
 pub fn cmdStatus(ctx: *Ctx, args: []const [:0]const u8) !void {
-    const cluster_name = if (args.len > 0) args[0] else "postgres";
+    const cluster_name = resolveClusterName(ctx, args);
     const l = try layout(ctx, cluster_name);
-    var env = try clusterEnv(ctx, &l);
+    var env = try clusterEnv(ctx, &l, null);
     defer env.deinit();
     const pg_ctl = try pathJoin(ctx, &.{ l.bin_dir, "pg_ctl" });
     const res = try ctx.runEnv(&.{ pg_ctl, "-D", l.data_dir, "status" }, null, &env);

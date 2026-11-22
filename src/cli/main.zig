@@ -56,7 +56,7 @@ fn dispatch(ctx: *Ctx, args: []const [:0]const u8) !void {
     const rest = args[2..];
 
     if (std.mem.eql(u8, command, "new")) return new_command.cmdNew(ctx, rest);
-    if (std.mem.eql(u8, command, "env")) return environment.cmdEnv(ctx);
+    if (std.mem.eql(u8, command, "env")) return environment.cmdEnv(ctx, rest);
     if (std.mem.eql(u8, command, "init")) return cluster.cmdInit(ctx, rest);
     if (std.mem.eql(u8, command, "start")) return cluster.cmdStart(ctx, rest);
     if (std.mem.eql(u8, command, "stop")) return cluster.cmdStop(ctx, rest);

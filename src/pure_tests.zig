@@ -24,6 +24,7 @@ test "range" {
 }
 
 test "cli helpers" {
+    _ = @import("cli/cluster.zig");
     _ = @import("cli/context.zig");
     _ = @import("cli/doctor.zig");
     _ = @import("cli/environment.zig");

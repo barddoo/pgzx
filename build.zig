@@ -16,8 +16,7 @@ pub fn build(b: *std.Build) void {
     const steps = .{
         .check = b.step("check", "Check if project compiles"),
         .test_pure = b.step("test", "Run pure-Zig tests (no Postgres server)"),
-        .docs = b.step("docs", "Generate documentation"),
-        .serve_docs = b.step("serve_docs", "Docs HTTP server http://localhost:8080/#docs.pgzx"),
+        .docs = b.step("docs", "Generate API documentation into zig-out/share/pgzx/docs"),
 
         // Unit tests installer target
         // Optionally build and install the extension, so we can hook up with t a debugger and run tests manually.
@@ -164,8 +163,10 @@ pub fn build(b: *std.Build) void {
 
     // docs step
     {
-        // Internal target to build the docs from the document. The generated
-        // documentation is installed in the <prefix>/share/pgzx/doc folder.
+        // Generate the Autodoc bundle and install it under share/pgzx/docs.
+        // Nothing is written into ./docs: that directory holds the Starlight
+        // site (docs/src/content/docs), and the API bundle is copied into its
+        // public/api at site build time by docs/scripts/sync-api.ts.
         //
         // The object name becomes the tar package/dir name, so it must match
         // the module root file's basename: Zig's autodoc picks a package's root
@@ -188,30 +189,6 @@ pub fn build(b: *std.Build) void {
             .install_subdir = "share/pgzx/docs",
         });
         steps.docs.dependOn(&install_docs.step);
-
-        // Remove only the generated doc artifacts, so hand-written files in
-        // ./docs (for example BUILD.md) survive `zig build docs`.
-        const del_docs = b.addSystemCommand(&[_][]const u8{
-            "rm",                "-fr",
-            "./docs/index.html", "./docs/main.js",
-            "./docs/main.wasm",  "./docs/sources.tar",
-        });
-        const copy_docs = b.addSystemCommand(&[_][]const u8{
-            "cp", "-fr", "./zig-out/share/pgzx/docs", ".",
-        });
-
-        // Only delete the checked-in docs after the build succeeds, so a
-        // failed build never leaves `./docs` empty.
-        del_docs.step.dependOn(&install_docs.step);
-        copy_docs.step.dependOn(&del_docs.step);
-        steps.docs.dependOn(&copy_docs.step);
-
-        // Use python to serve the docs via http.
-        const serve_docs = b.addSystemCommand(&[_][]const u8{
-            "python3", "-m", "http.server", "8080", "--directory", "./docs",
-        });
-        serve_docs.step.dependOn(&copy_docs.step);
-        steps.serve_docs.dependOn(&serve_docs.step);
     }
 
     // Source package: `pgzx-<version>.tar.gz` plus PGXN `META.json`, both

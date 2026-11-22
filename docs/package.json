@@ -1,0 +1,17 @@
+{
+  "name": "pgzx-docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.5",
+  "scripts": {
+    "sync-api": "bun scripts/sync-api.ts",
+    "dev": "astro dev",
+    "build": "bun run sync-api && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.43.1",
+    "astro": "^7.4.13"
+  }
+}

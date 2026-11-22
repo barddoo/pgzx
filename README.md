@@ -40,259 +40,16 @@ The following sample extensions (ordered from simple to complex) show how to use
 
 ## Docs
 
-The reference documentation is available at [here](https://barddoo.github.io/pgzx/#docs.pgzx). The examples above are the best place to start; the sections below walk through the most important utilities.
-
-### Getting Started
-
-You need **Zig 0.17+** and **PostgreSQL 15–19 with development headers**
-(`postgresql-server-dev-NN` on Debian/Ubuntu, `postgresql@NN` on Homebrew).
-
-Prebuilt commands are published for macOS (Apple silicon and Intel) and Linux
-(x86_64 and aarch64, statically linked).
-
-Install the `pgzx` command:
-
-```sh
-brew install barddoo/tap/pgzx              # macOS
-# or: curl -fsSL https://github.com/barddoo/pgzx/releases/latest/download/install.sh | sh
-```
-
-The install script accepts `--prefix DIR` (default `~/.local`) and `--with-zig`;
-it picks the binary for your OS/architecture and verifies the release checksum.
-
-From source (needs Zig and PostgreSQL headers):
-
-```sh
-zig build cli
-./zig-out/bin/pgzx version
-```
-
-Then create and run an extension:
-
-```sh
-pgzx doctor
-pgzx new my_extension
-cd my_extension
-eval "$(pgzx env)"
-pgzx init && pgzx start
-zig build -p "$PG_HOME"
-psql -U postgres -c 'CREATE EXTENSION my_extension'
-psql -U postgres -c 'SELECT hello()'
-```
-
-**With Docker** (nothing installed on the host):
-
-```sh
-docker build -f dev/docker/Dockerfile.standalone -t pgzx-standalone .
-docker run -it --rm -v "$PWD:/work" -w /work pgzx-standalone
-```
-
-Both paths create a working extension named `my_extension` exporting a
-`hello()` function.
-
-The generated [README](./templates/default/README.md) covers tests, the
-development loop and renaming the project. For a complete local setup guide see
-[HACKING.md](HACKING.md).
-
-`pgzx env` derives the project environment from `pg_config`: `PG_HOME` is the
-PostgreSQL install prefix and cluster state lives in `./out/pg`, so nothing is
-written into the PostgreSQL installation.
-
-### Logging and error handling
-
-Postgres [error reporting functions](https://www.postgresql.org/docs/current/error-message-reporting.html) provide log levels, formatting, and errors that can be thrown and caught like exceptions. pgzx wraps them for Zig.
-
-Simple logging uses [Log][docs_Log], [Info][docs_Info], [Notice][docs_Notice] or [Warning][docs_Warning]:
-
-```zig
-elog.Info(@src(), "input_text: {s}\n", .{input_text});
-```
-
-The `@src()` built-in records the file location in the error report.
-
-To report errors, use [Error][docs_Error] (returns a Zig error) or [ErrorThrow][docs_ErrorThrow] (throws a Postgres error report):
-
-```zig
-if (target_char.len > 1) {
-    return elog.Error(@src(), "Target char is more than one byte", .{});
-}
-```
-
-The module also exposes the C-style API (`ereport`, `errcode`, `errmsg`, ...).
-
-Postgres handles errors with `longjmp`, which can skip Zig `defer`/`errdefer` cleanup. pgzx provides a Zig alternative to `PG_TRY`:
-
-```zig
-var errctx = pgzx.err.Context.init();
-defer errctx.deinit();
-if (errctx.pg_try()) {
-    // Zig code that calls Postgres C functions.
-} else {
-    return errctx.errorValue();
-}
-```
-
-This catches errors raised by Postgres functions and returns them as Zig errors, so all `defer`/`errdefer` in the callers run. The [wrap][docs_wrap] helper packages this pattern:
-
-```zig
-try pgzx.err.wrap(myFunction, .{arg1, arg2});
-```
-
-See [pgzx.err.Context][docs_Context] for details.
-
-### Memory context allocators
-
-Postgres uses a [memory context system](https://github.com/postgres/postgres/blob/master/src/backend/utils/mmgr/README): allocations belong to a context, and freeing a context frees everything in it at once. Contexts are hierarchical, so a child context is freed with its parent.
-
-pgzx wraps contexts as Zig allocators. [createAllocSetContext][docs_createAllocSetContext] returns a [MemoryContextAllocator][docs_MemoryContextAllocator]:
-
-```zig
-var memctx = try pgzx.mem.createAllocSetContext("zig_context", .{ .parent = pg.CurrentMemoryContext });
-const allocator = memctx.allocator();
-```
-
-`pg.CurrentMemoryContext` is the context of the running query, so memory allocated with `allocator` is freed when the query finishes. You can also register a callback for when a context is reset or deleted, to release resources tied to it:
-
-```zig
-try memctx.registerAllocResetCallback(
-    queryDesc.*.estate.*.es_query_cxt,
-    pgaudit_zig_MemoryContextCallback,
-);
-```
-
-### Function manager
-
-Register Zig functions so they can be called from SQL with [PG_FUNCTION_V1][docs_PG_FUNCTION_V1]:
-
-```zig
-comptime {
-    pgzx.PG_FUNCTION_V1("my_function", myFunction);
-}
-```
-
-Parameters are received from Postgres serialized, and pgzx deserializes them into Zig types automatically.
-
-### Set-returning functions
-
-`SETOF` and `TABLE` functions return a `pgzx.srf.SetOf(I)` or `pgzx.srf.Table(I)` wrapping an iterator `I`: any struct with a `next(self: *I)` method that yields the next row, or `null` when the set is exhausted. `next` may also return `!?Item` to raise a Zig error as a Postgres error.
-
-```zig
-const Series = struct {
-    cur: i64,
-    finish: i64,
-    step: i64,
-
-    pub fn next(self: *Series) ?i64 {
-        if (self.cur > self.finish) return null;
-        defer self.cur += self.step;
-        return self.cur;
-    }
-};
-
-pub fn srf_series(start: i64, finish: i64, step: i64) pgzx.srf.SetOf(Series) {
-    return .{ .iter = .{ .cur = start, .finish = finish, .step = step } };
-}
-```
-
-For `Table(I)` the item is a struct with one field per column; the field names and the `pgzx.datum` converters (see [SQL schema generation](#sql-schema-generation)) produce the `RETURNS TABLE (...)` clause in generated DDL. Use `SetOf` for a single unnamed column.
-
-Postgres uses the value-per-call protocol: it calls the function once per row. The function body runs only on the first call, in a memory context that lives for the whole set, and the iterator is moved there; later calls run only `next`. Allocate everything the iterator needs while building it with `mem.PGCurrentContextAllocator` — `next` runs in a short-lived per-call context, so memory it allocates is only good for the row it returns. An iterator type may also define `fn deinit(self: *I) void`, which runs when the set ends or the query stops early (a `LIMIT`, an error, a cancelled query); it must not allocate or raise errors.
-
-See `examples/srf` for a complete set of fixtures, including nullable columns and iterators that fail.
-
-### SQL schema generation
-
-Instead of hand-writing the versioned extension script (`<name>--<version>.sql`), you can describe your SQL objects in a comptime declaration and let `zig build` render it. By convention the declaration lives in `src/schema.zig` and is named `pgzx_sql`:
-
-```zig
-const functions = @import("functions.zig");
-
-pub const pgzx_sql = .{
-    .functions = .{
-        .{ .name = "char_count_zig", .func = functions.char_count_zig },
-    },
-};
-```
-
-Then enable the `schema` step in `build.zig`:
-
-```zig
-_ = proj.addSteps(.{
-    .schema = .{},
-    // ...
-});
-```
-
-`zig build` (or `zig build sql`) compiles a small generator, renders the SQL, and installs it next to the `.control` file so `CREATE EXTENSION` picks it up. Argument types are derived from the Zig signatures through the `pgzx.datum` converters: `i32` becomes `integer`, `[]const u8` becomes `text`, and optional arguments do not change the SQL type. A `pg.FunctionCallInfo` parameter is treated as the fmgr context and is not emitted as an SQL argument.
-
-Per-function options:
-
-| Option       | Meaning                                                                   |
-| ------------ | ------------------------------------------------------------------------- |
-| `name`       | SQL function name (required).                                             |
-| `func`       | The Zig function (required).                                              |
-| `volatility` | `pgzx.ddl.Volatility`: `.@"volatile"` (default), `.stable`, `.immutable`. |
-| `strict`     | Emit `STRICT` (default `false`).                                          |
-| `parallel`   | `pgzx.ddl.Parallel`: `.unsafe`, `.restricted`, `.safe`.                   |
-| `args`       | Override argument SQL types, e.g. `&.{"text", "integer"}`.                |
-| `returns`    | Override the return SQL type.                                             |
-| `comment`    | Emit a `COMMENT ON FUNCTION`.                                             |
-
-Use `args`/`returns` for signatures with no direct SQL mapping, such as raw `pg.Datum` arguments. Keep `PG_FUNCTION_V1`/`PG_EXPORT` in `main.zig`, not in the schema module: the generator is linked as a standalone executable and cannot resolve Postgres server symbols. Objects that are not `CREATE FUNCTION` (types, operators, operator classes, casts) go in a source-level `catalog.sql`, which the generator appends after the functions. See `examples/rational` and `examples/sqlfns` for the complete pattern.
-
-### Testing your extension
-
-pgzx provides `pg_regress` tests and in-server unit tests, set up through the `PGBuild.Project` build helper:
-
-```zig
-const std = @import("std");
-const PGBuild = @import("pgzx").Build;
-
-pub fn build(b: *std.Build) void {
-    const proj = PGBuild.Project.init(b, .{
-        .name = "my_extension",
-        .version = .{ .major = 0, .minor = 1 },
-        .root_dir = "src/",
-        .root_source_file = "src/main.zig",
-    });
-
-    _ = proj.addSteps(.{
-        .pg_regress = .{
-            .db_user = "postgres",
-            .db_port = 5432,
-            .scripts = &[_][]const u8{"my_extension_test"},
-        },
-        .unit = .{
-            .db_user = "postgres",
-            .db_port = 5432,
-        },
-    });
-}
-```
-
-`addSteps` creates the `check`, `install`, `pg_regress` (when `.pg_regress` is set) and `unit` (when `.unit` is set) build steps, and defines the `build_options` module that gates `testfn`.
-
-[pg_regress tests](https://www.postgresql.org/docs/current/regress.html) work like they do for C extensions: inputs go in `sql/`, expected outputs in `expected/`, and run with:
-
-```sh
-zig build pg_regress
-```
-
-Unit tests run inside Postgres, so they compile in the same environment as the tested code and can call Postgres APIs. Each function whose name starts with `test` in a registered test suite is a unit test:
-
-```zig
-comptime {
-    pgzx.testing.registerTests(@import("build_options").testfn, .{Tests});
-}
-```
-
-`registerTests` may only be called once per extension; pass multiple suites in the array. Run the tests with:
-
-```sh
-zig build unit -p $PG_HOME
-```
-
-This builds a dedicated `{name}_unit` library with `testfn = true`, deploys it, and calls `SELECT run_tests();`. The separate library name means the test build never collides with the production extension.
+Documentation lives at **[pgzx.barddoo.com](https://pgzx.barddoo.com/)**:
+
+* [Installation](https://pgzx.barddoo.com/start/install/) — install the `pgzx` command, then scaffold and run an extension.
+* [Quickstart](https://pgzx.barddoo.com/start/quickstart/) — scaffold, build, call it from SQL, run the tests.
+* [Guides](https://pgzx.barddoo.com/guides/function-manager/) — logging and errors, memory contexts, the function manager, set-returning functions, SQL schema generation, testing.
+* [Build system](https://pgzx.barddoo.com/build-system/) — how `build.zig` is wired and how the extension SQL is generated.
+* [API reference](https://pgzx.barddoo.com/api/) — the full Zig API, generated with `zig build docs`.
+
+The [examples](examples/) above are the best place to start; each one is a
+self-contained package with its own `build.zig`.
 
 ## Status
 
@@ -308,7 +65,7 @@ PostgreSQL 15, 16, 17, 18 and 19 are supported: the examples and unit tests are 
 
 ## Contributing
 
-For a complete local development guide — creating a local PostgreSQL install, building, testing, debugging, editor setup, and switching Postgres versions — see [HACKING.md](HACKING.md).
+For a complete local development guide — creating a local PostgreSQL install, building, testing, debugging, editor setup, and switching Postgres versions — see [Local environment](https://pgzx.barddoo.com/contributing/environment/).
 
 ```
 $ zig build cli        # build ./zig-out/bin/pgzx
@@ -324,9 +81,9 @@ The examples build and test through each example's `ci/run.sh`; `./ci/run.sh` at
 Releases are cut from a `v*.*.*` tag. The release workflow runs the checks and
 `tools/build-dist.sh`, then uploads per-target archives
 (`pgzx-cli-<tag>-<target>.tar.gz`), the template archive, `install.sh` and
-`SHA256SUMS`. See
-[HACKING.md § 16](HACKING.md#16-releasing) for the artifact list, local test
-steps and the Homebrew formula update.
+`SHA256SUMS`. See the
+[release guide](https://pgzx.barddoo.com/contributing/debugging/#16-releasing)
+for the artifact list, local test steps and the Homebrew formula update.
 
 ## See also
 
@@ -344,16 +101,3 @@ If you have any questions, encounter issues, or need assistance, open an issue i
 
 <br>
 <p align="right">This project is based on the original <a href="https://github.com/xataio/pgzx">pgzx</a> code.</p>
-
-
-[docs_Log]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Log
-[docs_Info]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Info
-[docs_Notice]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Notice
-[docs_Warning]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Warning
-[docs_Error]: https://barddoo.github.io/pgzx/#A;pgzx:elog.Error
-[docs_ErrorThrow]: https://barddoo.github.io/pgzx/#A;pgzx:elog.ErrorThrow
-[docs_Context]: https://barddoo.github.io/pgzx/#A;pgzx:err.Context
-[docs_wrap]: https://barddoo.github.io/pgzx/#A;pgzx:err.wrap
-[docs_createAllocSetContext]: https://barddoo.github.io/pgzx/#A;pgzx:mem.createAllocSetContext
-[docs_MemoryContextAllocator]: https://barddoo.github.io/pgzx/#A;pgzx:mem.MemoryContextAllocator
-[docs_PG_FUNCTION_V1]: https://barddoo.github.io/pgzx/#A;pgzx:PG_FUNCTION_V1
