@@ -31,7 +31,9 @@ All notable changes to pgzx are recorded here. The format follows
 
 - The default PostgreSQL version is now 19: the Docker image and Compose
   service, the CI end-to-end jobs, the documentation and `pgzx doctor` all
-  point at PostgreSQL 19. The test matrix still covers 15–19.
+  point at PostgreSQL 19. The test matrix still covers 15–19. Homebrew has no
+  `postgresql@19` yet, so the macOS docs and end-to-end job use
+  `postgresql@18`.
 - `eval "$(pgzx env)"` now also exports the cluster's `PGUSER` and `PGDATABASE`
   (default `postgres`), so a bare `psql` connects to the project cluster instead
   of using the OS user.

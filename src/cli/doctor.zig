@@ -72,7 +72,7 @@ fn doctorPg(ctx: *Ctx, failures: *usize) !void {
         );
         try ctx.out.writeAll("         Debian: sudo apt install postgresql-19 " ++
             "postgresql-server-dev-19\n");
-        try ctx.out.writeAll("         macOS:  brew install postgresql@19\n");
+        try ctx.out.writeAll("         macOS:  brew install postgresql@18\n");
         failures.* += 1;
         return;
     }

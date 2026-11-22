@@ -43,12 +43,14 @@ writable. Each failure is printed with the command that fixes it.
 ### Option A: Homebrew (macOS)
 
 ```sh
-brew install postgresql@19 openssl@3 krb5 zig
-brew link --force postgresql@19
+brew install postgresql@18 openssl@3 krb5 zig
+brew link --force postgresql@18
 ```
 
-Homebrew prefixes are owned by your user, so installing the extension into
-PostgreSQL needs no elevated permissions.
+Homebrew has no `postgresql@19` formula yet; 18 is the newest available there.
+For 19, use the Docker image or the PGDG packages on Linux. Homebrew prefixes are
+owned by your user, so installing the extension into PostgreSQL needs no elevated
+permissions.
 
 ### Option B: Raw install (Linux)
 

@@ -170,15 +170,16 @@ jobs:
           if-no-files-found: ignore
 
   macos:
-    name: End-to-end (macOS, PostgreSQL 19)
+    name: End-to-end (macOS, PostgreSQL 18)
     runs-on: macos-15
     steps:
       - name: git checkout
         uses: actions/checkout@v7
       - name: Install PostgreSQL
         run: |
-          brew install postgresql@19 openssl@3 krb5
-          echo "PG_CONFIG=$(brew --prefix postgresql@19)/bin/pg_config" >>"$GITHUB_ENV"
+          # Homebrew does not ship postgresql@19 yet; the Linux jobs cover 19.
+          brew install postgresql@18 openssl@3 krb5
+          echo "PG_CONFIG=$(brew --prefix postgresql@18)/bin/pg_config" >>"$GITHUB_ENV"
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
