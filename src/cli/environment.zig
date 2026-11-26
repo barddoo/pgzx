@@ -64,25 +64,11 @@ pub fn pgHome(ctx: *Ctx) ![]const u8 {
     const pkglibdir = try pgConfig(ctx, "--pkglibdir");
     const parent = std.fs.path.dirname(bindir) orelse bindir;
     if (isSubpath(pkglibdir, parent)) return parent;
-    // On macOS, Homebrew puts lib/ outside the formula prefix. When bindir is
-    // inside the Cellar, use the stable opt/<formula> symlink instead of the
-    // common ancestor (which would be the whole Homebrew root).
-    if (builtin.os.tag == .macos) {
-        if (brewFormulaPrefix(ctx, bindir)) |prefix| return prefix;
-    }
+    // When pkglibdir is outside the parent of bindir (e.g. Homebrew puts
+    // --pkglibdir at /opt/homebrew/lib/ while --bindir is in the Cellar),
+    // fall back to the common ancestor so that `zig build -p "$PG_HOME"`
+    // places the dylib and extension files where pg_config reports them.
     return commonAncestor(parent, pkglibdir);
-}
-
-/// Derive the Homebrew opt/<formula> prefix from a Cellar bindir.
-/// /opt/homebrew/Cellar/<formula>/<version>/bin  →  /opt/homebrew/opt/<formula>
-fn brewFormulaPrefix(ctx: *Ctx, bindir: []const u8) ?[]const u8 {
-    const marker = "/Cellar/";
-    const cellar_pos = std.mem.indexOf(u8, bindir, marker) orelse return null;
-    const after = bindir[cellar_pos + marker.len ..];
-    const slash = std.mem.indexOfScalar(u8, after, '/') orelse return null;
-    const formula = after[0..slash];
-    const root = bindir[0..cellar_pos];
-    return pathJoin(ctx, &.{ root, "opt", formula }) catch null;
 }
 
 fn isSubpath(path: []const u8, parent: []const u8) bool {
