@@ -10,6 +10,7 @@
     },
     .paths = .{
         "build.zig",
+        "build.zig.zon",
         "src",
         "tools/gennodetags/main.zig",
         "tools/gennodetags/translate.h",
